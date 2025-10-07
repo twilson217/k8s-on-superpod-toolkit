@@ -1,21 +1,21 @@
-# RunAI 2.23 / Kubernetes 1.34 Environment
+# Kubernetes on SuperPOD Toolkit
 
 This repository contains tools and scripts for managing a SuperPOD customer environment running RunAI and Kubernetes.
 
 ## Environment Discovery Script
 
-### `discover_environment.py`
+### `pre-upgrade-snapshot.py`
 
 A comprehensive Python-based discovery script that captures a complete snapshot of the Kubernetes and RunAI environment in Markdown format with a table of contents.
 
 **Usage:**
 ```bash
-./discover_environment.py
+./pre-upgrade-snapshot.py
 ```
 
 Or with Python directly:
 ```bash
-python3 discover_environment.py
+python3 pre-upgrade-snapshot.py
 ```
 
 **Output:**
@@ -47,13 +47,17 @@ python3 discover_environment.py
 
 ```
 .
-├── discover_environment.py    # Environment discovery script (Python)
-├── discover-environment.sh    # Legacy bash script (deprecated)
+├── pre-upgrade-snapshot.py    # Pre-upgrade environment discovery script
 ├── .logs/                     # Output directory (git-ignored)
 │   └── pre-upgrade-snapshot.md
 ├── .gitignore                 # Git exclusions
 └── README.md                  # This file
 ```
+
+## Naming Convention
+
+Scripts are named to match their output files for easy tracking:
+- `pre-upgrade-snapshot.py` → `.logs/pre-upgrade-snapshot.md`
 
 ## Requirements
 

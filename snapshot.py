@@ -2,28 +2,27 @@
 
 """
 Kubernetes & RunAI Environment Discovery Script
-Purpose: Complete pre-upgrade snapshot of the environment
-Output: pre-upgrade-snapshot.md (Markdown format with TOC)
+Purpose: Complete snapshot of the environment
+Supports --pre, --post, and --diff modes
 """
 
 import subprocess
 import json
 import os
 import sys
+import argparse
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple, Optional
-
-# Configuration
-LOGS_DIR = ".logs"
-OUTPUT_FILE = f"{LOGS_DIR}/pre-upgrade-snapshot.md"
+from difflib import unified_diff
 
 
 class EnvironmentDiscovery:
-    def __init__(self):
+    def __init__(self, output_file: str):
         self.output_lines = []
         self.toc_entries = []
         self.section_counter = 0
+        self.output_file = output_file
         
     def run_command(self, cmd: List[str], description: str = "") -> Tuple[bool, str, str]:
         """Run a command and return success status, stdout, and stderr."""
@@ -104,22 +103,22 @@ class EnvironmentDiscovery:
     def save_output(self):
         """Save the output to a file."""
         # Create logs directory
-        Path(LOGS_DIR).mkdir(exist_ok=True)
+        Path(os.path.dirname(self.output_file)).mkdir(exist_ok=True)
         
         # Generate TOC and prepend to output
         toc = self.generate_toc()
         full_output = toc + self.output_lines
         
-        with open(OUTPUT_FILE, 'w') as f:
+        with open(self.output_file, 'w') as f:
             f.write('\n'.join(full_output))
         
         print(f"\n{'='*80}")
         print("Discovery Complete!")
         print(f"{'='*80}\n")
-        print(f"Output file: {OUTPUT_FILE}")
+        print(f"Output file: {self.output_file}")
         
         # Get file size
-        file_size = os.path.getsize(OUTPUT_FILE)
+        file_size = os.path.getsize(self.output_file)
         if file_size < 1024:
             size_str = f"{file_size} bytes"
         elif file_size < 1024 * 1024:
@@ -135,7 +134,7 @@ class EnvironmentDiscovery:
         print(f"  - RunAI specific configurations extracted")
         print(f"  - System and hardware information included")
         print(f"\nThis snapshot can be used for:")
-        print(f"  - Pre-upgrade documentation")
+        print(f"  - Pre/Post-upgrade documentation")
         print(f"  - Disaster recovery planning")
         print(f"  - Configuration auditing")
         print(f"  - Troubleshooting reference")
@@ -144,7 +143,7 @@ class EnvironmentDiscovery:
     def discover(self):
         """Main discovery process."""
         print("Starting environment discovery...")
-        print(f"Output will be written to: {OUTPUT_FILE}\n")
+        print(f"Output will be written to: {self.output_file}\n")
         
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')
         hostname = subprocess.run(['hostname'], capture_output=True, text=True).stdout.strip()
@@ -621,12 +620,99 @@ class EnvironmentDiscovery:
             self.add_text("")
 
 
+def generate_diff_report(pre_file: str, post_file: str, output_file: str):
+    """Generate a diff report comparing pre and post snapshots."""
+    print("Generating diff report...")
+    
+    if not os.path.exists(pre_file):
+        print(f"Error: Pre-upgrade snapshot not found: {pre_file}")
+        return 1
+    
+    if not os.path.exists(post_file):
+        print(f"Error: Post-upgrade snapshot not found: {post_file}")
+        return 1
+    
+    with open(pre_file, 'r') as f:
+        pre_lines = f.readlines()
+    
+    with open(post_file, 'r') as f:
+        post_lines = f.readlines()
+    
+    # Create output directory
+    Path(os.path.dirname(output_file)).mkdir(exist_ok=True)
+    
+    with open(output_file, 'w') as f:
+        f.write("# Upgrade Diff Snapshot\n\n")
+        f.write("This document shows the differences between pre-upgrade and post-upgrade snapshots.\n\n")
+        f.write(f"**Pre-upgrade file:** `{pre_file}`\n\n")
+        f.write(f"**Post-upgrade file:** `{post_file}`\n\n")
+        f.write("---\n\n")
+        f.write("## Unified Diff\n\n")
+        f.write("```diff\n")
+        
+        # Generate unified diff
+        diff = unified_diff(
+            pre_lines,
+            post_lines,
+            fromfile=pre_file,
+            tofile=post_file,
+            lineterm=''
+        )
+        
+        for line in diff:
+            f.write(line + '\n')
+        
+        f.write("```\n")
+    
+    print(f"\nDiff report generated: {output_file}")
+    
+    # Get file size
+    file_size = os.path.getsize(output_file)
+    if file_size < 1024:
+        size_str = f"{file_size} bytes"
+    elif file_size < 1024 * 1024:
+        size_str = f"{file_size / 1024:.2f} KB"
+    else:
+        size_str = f"{file_size / (1024 * 1024):.2f} MB"
+    
+    print(f"File size: {size_str}")
+    return 0
+
+
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description='Kubernetes Environment Discovery Script - Complete snapshot of the environment'
+    )
+    
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--pre', action='store_true', help='Collect pre-upgrade snapshot')
+    group.add_argument('--post', action='store_true', help='Collect post-upgrade snapshot')
+    group.add_argument('--diff', action='store_true', help='Generate diff report comparing pre and post snapshots')
+    
+    args = parser.parse_args()
+    
+    logs_dir = ".logs"
+    
     try:
-        discovery = EnvironmentDiscovery()
-        discovery.discover()
-        return 0
+        if args.pre:
+            output_file = f"{logs_dir}/pre-upgrade-snapshot.md"
+            discovery = EnvironmentDiscovery(output_file)
+            discovery.discover()
+            return 0
+        
+        elif args.post:
+            output_file = f"{logs_dir}/post-upgrade-snapshot.md"
+            discovery = EnvironmentDiscovery(output_file)
+            discovery.discover()
+            return 0
+        
+        elif args.diff:
+            pre_file = f"{logs_dir}/pre-upgrade-snapshot.md"
+            post_file = f"{logs_dir}/post-upgrade-snapshot.md"
+            output_file = f"{logs_dir}/diff-snapshot.md"
+            return generate_diff_report(pre_file, post_file, output_file)
+        
     except KeyboardInterrupt:
         print("\n\nDiscovery interrupted by user.")
         return 1
