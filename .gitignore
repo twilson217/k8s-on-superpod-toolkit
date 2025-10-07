@@ -1,0 +1,21 @@
+# Logs directory - contains environment snapshots and discovery outputs
+.logs/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Backup files
+*.bak
+*~
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Editor specific
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
