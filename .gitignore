@@ -1,6 +1,19 @@
 # Logs directory - contains environment snapshots and discovery outputs
 .logs/
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
 # Temporary files
 *.tmp
 *.temp
