@@ -180,7 +180,7 @@ metadata:
   namespace: network-operator
 spec:
   nvIpam:
-    image: nv-ipam
+    image: nvidia-k8s-ipam  # Note: Use nvidia-k8s-ipam (not nv-ipam) for 25.x
     repository: ghcr.io/mellanox
     version: v0.2.0
     imagePullSecrets: []
@@ -192,6 +192,8 @@ kubectl apply -f nic-cluster-policy.yaml
 ```
 
 This deploys the `nv-ipam` DaemonSet and creates the `IPPool` CRD, allowing IP address management for secondary networks.
+
+**Important**: Ensure the `image` field is set to `nvidia-k8s-ipam` (not `nv-ipam`). This is a critical change in Network Operator 25.x that is not well documented. See Resolution Part 3 for details if image pull errors occur.
 
 ## Resolution Part 2: Firmware Configuration and Power Cycle Requirement
 
@@ -341,6 +343,123 @@ Allocatable:
   nvidia.com/resibp94s0:   8
 ```
 
+## Resolution Part 3: NV-IPAM Image Configuration Issue
+
+### Root Cause #3: Incorrect Image Name in NicClusterPolicy
+
+After successfully deploying the Network Operator 25.7.0 and completing the cold reboot to activate SR-IOV VFs, a new issue emerged: the `nv-ipam` pods were failing to start with `ImagePullBackOff` or `ErrImagePull` status.
+
+**Investigation revealed:**
+```bash
+kubectl get pods -n network-operator | grep ipam
+```
+
+Output showed:
+```
+nv-ipam-xxxxx    0/1    ImagePullBackOff    0    10m
+```
+
+**Checking the image pull error:**
+```bash
+kubectl describe pod <nv-ipam-pod-name> -n network-operator
+```
+
+Showed errors attempting to pull images from incorrect registries:
+- `ghcr.io/mellanox/nv-ipam:v0.2.0` (403 Forbidden or 401 Unauthorized)
+- `nvcr.io/nvstaging/mellanox/nv-ipam:v0.2.0` (authentication errors)
+
+### Problem Analysis
+
+The initial `NicClusterPolicy` configuration (created in Resolution Part 1) specified:
+
+```yaml
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+  namespace: network-operator
+spec:
+  nvIpam:
+    image: nv-ipam              # ❌ INCORRECT
+    repository: ghcr.io/mellanox
+    version: v0.2.0
+    imagePullSecrets: []
+    enableWebhook: false
+```
+
+This configuration was based on assumptions from the 24.7.0 deployment, but **the image name changed in the Network Operator 25.7.0 release**.
+
+### Solution: Update Image Name
+
+The correct configuration was found in the Network Operator 25.1.0 documentation (the 25.7.0 documentation had incomplete information):
+
+```yaml
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+  namespace: network-operator
+spec:
+  nvIpam:
+    image: nvidia-k8s-ipam      # ✅ CORRECT
+    repository: ghcr.io/mellanox
+    version: v0.2.0
+    imagePullSecrets: []
+    enableWebhook: false
+```
+
+**Key Change**: `image: nv-ipam` → `image: nvidia-k8s-ipam`
+
+### Applying the Fix
+
+```bash
+# Edit the NicClusterPolicy
+kubectl edit nicclusterpolicy nic-cluster-policy -n network-operator
+
+# Update the nvIpam.image field from "nv-ipam" to "nvidia-k8s-ipam"
+# Save and exit
+```
+
+After applying the change:
+```bash
+# Verify the nv-ipam pods are now running
+kubectl get pods -n network-operator | grep ipam
+
+# Expected output:
+# nv-ipam-xxxxx    1/1    Running    0    2m
+```
+
+### Verification: IPPools Created
+
+With `nv-ipam` running correctly, the IPPool custom resources were created to provide IP addresses for InfiniBand VFs:
+
+```bash
+kubectl get ippools.nv-ipam.nvidia.com -n network-operator
+```
+
+Expected output:
+```
+NAME                   SUBNET            GATEWAY   BLOCK SIZE
+vf-pool-192-168-1      192.168.1.0/24              8
+vf-pool-192-168-2      192.168.2.0/24              8
+vf-pool-192-168-3      192.168.3.0/24              8
+vf-pool-192-168-4      192.168.4.0/24              8
+vf-pool-192-168-5      192.168.5.0/24              8
+vf-pool-192-168-6      192.168.6.0/24              8
+vf-pool-192-168-7      192.168.7.0/24              8
+vf-pool-192-168-8      192.168.8.0/24              8
+```
+
+**IPPool Configuration Note**: Each DGX B200 node has 8 physical HCAs (InfiniBand adapters), and each HCA requires 8 VF IP addresses (one per GPU) for GPU-to-GPU communication. Therefore, 8 separate IP pools with `perNodeBlockSize: 8` were created to ensure sufficient IP address allocation (64 VF IPs per node total).
+
+### Documentation Gap
+
+**Important Note**: This image name discrepancy was not clearly documented in the Network Operator 25.7.0 upgrade guide. The correct image name (`nvidia-k8s-ipam`) was found by consulting the 25.1.0 documentation. Future upgraders should be aware of this change.
+
+The correct image naming convention for NVIDIA Network Operator 25.x releases:
+- **Correct**: `nvidia-k8s-ipam`
+- **Incorrect**: `nv-ipam`, `nv-ipam-controller`, `ipam-controller`
+
 ## Key Learnings
 
 ### 1. Firmware Changes Require Cold Reboot
@@ -371,6 +490,13 @@ Allocatable:
 - Use explicit `pfNames` in `nicSelector` to target specific interfaces
 - This prevents accidental configuration of inappropriate devices (DPUs, internal mezz cards)
 - Vendor filtering (`vendor: 15b3`) provides additional safety
+
+### 6. NV-IPAM Image Name Change in 25.x
+- Network Operator 25.x uses a different image name for the IPAM component
+- Correct image name: `nvidia-k8s-ipam` (not `nv-ipam`)
+- This change was not well documented in the 25.7.0 release notes
+- Using the wrong image name causes `ImagePullBackOff` errors
+- The correct configuration can be found in the 25.1.0 documentation
 
 ## Troubleshooting Tips for Future Issues
 
@@ -440,5 +566,5 @@ kubectl get sriovnetworknodepolicy -n network-operator
 ---
 
 **Document Created**: October 7, 2025  
-**Last Updated**: October 7, 2025  
-**Status**: Resolved - Both nodes (dgx030, dgx031) operational with SR-IOV VFs active
+**Last Updated**: October 13, 2025  
+**Status**: Resolved - Both nodes (dgx030, dgx031) operational with SR-IOV VFs active and nv-ipam functioning correctly

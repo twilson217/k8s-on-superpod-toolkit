@@ -259,10 +259,16 @@ def run_nccl_test(project_name, num_nodes):
             "default/ibp220s0,default/ibp24s0,default/ibp64s0,default/ibp79s0,default/ibp94s0"
         ),
         "-e", "CUDA_DEVICE_MAX_CONNECTIONS=1",
-        "-e", "NCCL_SOCKET_IFNAME=eth0",
+        "-e", "NCCL_SOCKET_IFNAME=eth0",  # Only for bootstrap/control plane
+        "-e", "NCCL_IB_DISABLE=0",  # Explicitly enable InfiniBand
+        "-e", "NCCL_IB_HCA=mlx5_4,mlx5_7,mlx5_8,mlx5_9,mlx5_10,mlx5_13,mlx5_14,mlx5_15",  # All 8 IB adapters
+        "-e", "NCCL_IB_GID_INDEX=3",  # RoCE v2 / IB compatibility
+        "-e", "NCCL_IB_QPS_PER_CONNECTION=4",  # Increased from 2 for better performance
+        "-e", "NCCL_IB_SPLIT_DATA_ON_QPS=0",
+        "-e", "NCCL_NET_GDR_LEVEL=5",  # Enable GPUDirect RDMA
         "-e", "NCCL_ASYNC_ERROR_HANDLING=1",
-        "-e", "NCCL_IB_QPS_PER_CONNECTION=2",
-        "-e", "NCCL_IB_SPLIT_DATA_ON_QPS=0"
+        "-e", "NCCL_DEBUG=INFO",  # Enable debug output for troubleshooting
+        "-e", "NCCL_DEBUG_SUBSYS=INIT,NET"  # Focus on initialization and network subsystems
     ]
     
     print(f"\nSubmitting NCCL test with {num_nodes} nodes ({total_processes} total processes)...")

@@ -1,6 +1,9 @@
 # Logs directory - contains environment snapshots and discovery outputs
 .logs/
 
+# Cursor chat exports
+cursorchats/
+
 # Python
 __pycache__/
 *.py[cod]
