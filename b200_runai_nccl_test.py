@@ -285,7 +285,7 @@ def run_nccl_test(project_name, num_nodes):
         "-e", "NCCL_ASYNC_ERROR_HANDLING=1",
         # UCX Configuration for MPI transport
         "-e", "UCX_TLS=rc",  # Use reliable connection transport
-        "-e", "UCX_NET_DEVICES=mlx5_15:1,mlx5_10:1,mlx5_14:1,mlx5_13:1,mlx5_8:1,mlx5_7:1,mlx5_9:1,mlx5_4:1"  # Specify all IB devices
+        "-e", "UCX_NET_DEVICES=mlx5:1"  # Auto-detect all mlx5_* devices on port 1 (wildcard pattern)
     ]
     
     print(f"\nSubmitting NCCL test with {num_nodes} nodes ({total_processes} total processes)...")
