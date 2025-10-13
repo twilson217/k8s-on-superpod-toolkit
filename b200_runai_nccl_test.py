@@ -272,7 +272,7 @@ def run_nccl_test(project_name, num_nodes):
         "-e", "NCCL_DEBUG_SUBSYS=INIT,NET",  # Focus on initialization and network subsystems
         # InfiniBand Configuration
         "-e", "NCCL_IB_DISABLE=0",  # Explicitly enable InfiniBand
-        "-e", "NCCL_IB_HCA=mlx5_15,mlx5_10,mlx5_14,mlx5_13,mlx5_8,mlx5_7,mlx5_9,mlx5_4",  # All 8 IB adapters (order from working config)
+        "-e", "NCCL_IB_HCA=mlx5",  # Auto-detect all mlx5_* devices (wildcard pattern)
         "-e", "NCCL_IB_QPS_PER_CONNECTION=2",  # Queue pairs per connection
         "-e", "NCCL_IB_SPLIT_DATA_ON_QPS=0",  # Don't split data across QPs
         "-e", "NCCL_IB_ADAPTIVE_ROUTING=1",  # Enable adaptive routing
