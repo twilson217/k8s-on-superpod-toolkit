@@ -251,6 +251,14 @@ def run_nccl_test(project_name, num_nodes):
         "--master-command", "mpirun",
         "--master-args", (
             f"--allow-run-as-root --bind-to none -map-by slot -np {total_processes} "
+            "-x NCCL_DEBUG -x NCCL_DEBUG_SUBSYS "
+            "-x NCCL_IB_DISABLE -x NCCL_IB_HCA -x NCCL_IB_GID_INDEX "
+            "-x NCCL_IB_QPS_PER_CONNECTION -x NCCL_IB_SPLIT_DATA_ON_QPS "
+            "-x NCCL_IB_ADAPTIVE_ROUTING -x NCCL_IB_SL "
+            "-x NCCL_NET_GDR_LEVEL -x NCCL_NVLS_ENABLE -x NCCL_ALGO "
+            "-x NCCL_SOCKET_IFNAME -x NCCL_ASYNC_ERROR_HANDLING "
+            "-x CUDA_DEVICE_MAX_CONNECTIONS "
+            "-x UCX_TLS -x UCX_NET_DEVICES "
             "-mca pml ob1 -mca btl self,tcp all_reduce_perf_mpi -b 1G -e 16G -f 2 -n 100 -g 1"
         ),
         "--image-pull-policy", "IfNotPresent",
@@ -258,17 +266,26 @@ def run_nccl_test(project_name, num_nodes):
             "k8s.v1.cni.cncf.io/networks=default/ibp192s0,default/ibp206s0,default/ibp154s0,"
             "default/ibp220s0,default/ibp24s0,default/ibp64s0,default/ibp79s0,default/ibp94s0"
         ),
+        # NCCL Configuration - Based on working Slurm B200 configuration
         "-e", "CUDA_DEVICE_MAX_CONNECTIONS=1",
-        "-e", "NCCL_SOCKET_IFNAME=eth0",  # Only for bootstrap/control plane
-        "-e", "NCCL_IB_DISABLE=0",  # Explicitly enable InfiniBand
-        "-e", "NCCL_IB_HCA=mlx5_4,mlx5_7,mlx5_8,mlx5_9,mlx5_10,mlx5_13,mlx5_14,mlx5_15",  # All 8 IB adapters
-        "-e", "NCCL_IB_GID_INDEX=3",  # RoCE v2 / IB compatibility
-        "-e", "NCCL_IB_QPS_PER_CONNECTION=4",  # Increased from 2 for better performance
-        "-e", "NCCL_IB_SPLIT_DATA_ON_QPS=0",
-        "-e", "NCCL_NET_GDR_LEVEL=5",  # Enable GPUDirect RDMA
-        "-e", "NCCL_ASYNC_ERROR_HANDLING=1",
         "-e", "NCCL_DEBUG=INFO",  # Enable debug output for troubleshooting
-        "-e", "NCCL_DEBUG_SUBSYS=INIT,NET"  # Focus on initialization and network subsystems
+        "-e", "NCCL_DEBUG_SUBSYS=INIT,NET",  # Focus on initialization and network subsystems
+        # InfiniBand Configuration
+        "-e", "NCCL_IB_DISABLE=0",  # Explicitly enable InfiniBand
+        "-e", "NCCL_IB_HCA=mlx5_15,mlx5_10,mlx5_14,mlx5_13,mlx5_8,mlx5_7,mlx5_9,mlx5_4",  # All 8 IB adapters (order from working config)
+        "-e", "NCCL_IB_QPS_PER_CONNECTION=2",  # Queue pairs per connection
+        "-e", "NCCL_IB_SPLIT_DATA_ON_QPS=0",  # Don't split data across QPs
+        "-e", "NCCL_IB_ADAPTIVE_ROUTING=1",  # Enable adaptive routing
+        "-e", "NCCL_IB_SL=1",  # Service level
+        # Performance Configuration
+        "-e", "NCCL_NET_GDR_LEVEL=5",  # Enable GPUDirect RDMA
+        "-e", "NCCL_NVLS_ENABLE=1",  # Enable NVLink Switch (critical for B200)
+        "-e", "NCCL_ALGO=RING",  # Use ring algorithm
+        "-e", "NCCL_SOCKET_IFNAME=eth0",  # Use eth0 for bootstrap (container interface)
+        "-e", "NCCL_ASYNC_ERROR_HANDLING=1",
+        # UCX Configuration for MPI transport
+        "-e", "UCX_TLS=rc",  # Use reliable connection transport
+        "-e", "UCX_NET_DEVICES=mlx5_15:1,mlx5_10:1,mlx5_14:1,mlx5_13:1,mlx5_8:1,mlx5_7:1,mlx5_9:1,mlx5_4:1"  # Specify all IB devices
     ]
     
     print(f"\nSubmitting NCCL test with {num_nodes} nodes ({total_processes} total processes)...")
