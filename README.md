@@ -47,28 +47,59 @@ python3 snapshot.py
 
 ### `b200_runai_nccl_test.py`
 
-A Python script for running multi-node NCCL (NVIDIA Collective Communications Library) tests in a RunAI environment. The script automatically submits an MPI job and captures logs from all pods.
+A Python script for running multi-node NCCL (NVIDIA Collective Communications Library) tests on NVIDIA B200 systems in a RunAI environment. The script automatically submits an MPI job and captures logs from all pods.
+
+**Optimized for B200 Performance:**
+- Achieves **388.66 GB/s** average bus bandwidth on 2-node (16 GPU) tests
+- Enables InfiniBand with SHARP (Scalable Hierarchical Aggregation and Reduction Protocol)
+- Utilizes all 8 InfiniBand adapters per B200 node
+- Configured with proven NCCL and UCX environment variables
 
 **Usage:**
 ```bash
+# Normal mode (default - debug output disabled for best performance)
 python3 b200_runai_nccl_test.py --project <PROJECT_NAME> --nodes <NUM_NODES>
+
+# Debug mode (enables NCCL_DEBUG=INFO for troubleshooting)
+python3 b200_runai_nccl_test.py --project <PROJECT_NAME> --nodes <NUM_NODES> --debug
 ```
 
-**Example:**
+**Examples:**
 ```bash
+# Run 2-node NCCL test (16 GPUs total)
 python3 b200_runai_nccl_test.py --project test --nodes 2
+
+# Run with debug output enabled for troubleshooting
+python3 b200_runai_nccl_test.py --project test --nodes 2 --debug
+
+# Run 4-node NCCL test (32 GPUs total)
+python3 b200_runai_nccl_test.py --project production --nodes 4
 ```
+
+**Command-Line Options:**
+- `--project` (required) - RunAI project name
+- `--nodes` (required) - Number of worker nodes (each B200 has 8 GPUs)
+- `--debug` (optional) - Enable NCCL debug output (NCCL_DEBUG=INFO, NCCL_DEBUG_SUBSYS=INIT,NET)
 
 **What it does:**
 - Configures the RunAI project
-- Submits an MPI job with the specified number of worker nodes
+- Auto-increments job names (nccl-test1, nccl-test2, etc.)
+- Submits an MPI job with optimized B200 NCCL configuration
 - Waits for all pods (launcher + workers) to be created
 - Automatically captures logs from all pods to `.logs/` directory
 - Creates timestamped log files for each pod
 
 **Output:**
-- Log files in `.logs/` with format: `nccl-test1_{pod_name}_{timestamp}.log`
+- Log files in `.logs/` with format: `nccl-test<N>_{pod_name}_{timestamp}.log`
 - Real-time log streaming in background threads
+- NCCL bandwidth results showing bus bandwidth and algorithm bandwidth
+
+**NCCL Configuration:**
+- **InfiniBand**: Enabled with all 8 mlx5 adapters, adaptive routing, SHARP
+- **NVLink Switch**: Enabled (NCCL_NVLS_ENABLE=1, critical for B200)
+- **GPUDirect RDMA**: Level 5 for optimal GPU-to-IB performance
+- **UCX Transport**: Reliable Connection (rc) for MPI
+- **Debug Output**: Disabled by default for best performance, enable with `--debug`
 
 ### Manual Command (Copy & Paste Alternative)
 
@@ -78,7 +109,7 @@ If you prefer to run the `runai mpi submit` command directly without the Python 
 # First, configure your project
 runai config project <PROJECT_NAME>
 
-# Then submit the NCCL test job
+# Then submit the NCCL test job (2 nodes = 16 GPUs)
 runai mpi submit nccl-test1 \
   -i docker.io/deepops/nccl-tests:2312 \
   --workers 2 \
@@ -95,14 +126,28 @@ runai mpi submit nccl-test1 \
   --stdin \
   --tty \
   --master-command mpirun \
-  --master-args "--allow-run-as-root --bind-to none -map-by slot -np 16 -mca pml ob1 -mca btl self,tcp all_reduce_perf_mpi -b 1G -e 16G -f 2 -n 100 -g 1" \
+  --master-args "--allow-run-as-root --bind-to none -map-by slot -np 16 -x NCCL_IB_DISABLE -x NCCL_IB_HCA -x NCCL_IB_QPS_PER_CONNECTION -x NCCL_IB_SPLIT_DATA_ON_QPS -x NCCL_IB_ADAPTIVE_ROUTING -x NCCL_IB_SL -x NCCL_NET_GDR_LEVEL -x NCCL_NVLS_ENABLE -x NCCL_ALGO -x NCCL_SOCKET_IFNAME -x NCCL_ASYNC_ERROR_HANDLING -x CUDA_DEVICE_MAX_CONNECTIONS -x UCX_TLS -mca pml ob1 -mca btl self,tcp all_reduce_perf_mpi -b 1G -e 16G -f 2 -n 100 -g 1" \
   --image-pull-policy IfNotPresent \
-  --annotation k8s.v1.cni.cncf.io/networks=default/ibp192s0,default/ibp206s0,default/ibp154s0,default/ibp220s0,default/ibp24s0,default/ibp64s0,default/ibp79s0,default/ibp94s0 \
+  --annotation k8s.v1.cni.cncf.io/networks=network-operator/ibp192s0-sriovnet,network-operator/ibp206s0-sriovnet,network-operator/ibp154s0-sriovnet,network-operator/ibp220s0-sriovnet,network-operator/ibp24s0-sriovnet,network-operator/ibp64s0-sriovnet,network-operator/ibp79s0-sriovnet,network-operator/ibp94s0-sriovnet \
   -e CUDA_DEVICE_MAX_CONNECTIONS=1 \
+  -e NCCL_IB_DISABLE=0 \
+  -e NCCL_IB_HCA=mlx5 \
+  -e NCCL_IB_QPS_PER_CONNECTION=2 \
+  -e NCCL_IB_SPLIT_DATA_ON_QPS=0 \
+  -e NCCL_IB_ADAPTIVE_ROUTING=1 \
+  -e NCCL_IB_SL=1 \
+  -e NCCL_NET_GDR_LEVEL=5 \
+  -e NCCL_NVLS_ENABLE=1 \
+  -e NCCL_ALGO=RING \
   -e NCCL_SOCKET_IFNAME=eth0 \
   -e NCCL_ASYNC_ERROR_HANDLING=1 \
-  -e NCCL_IB_QPS_PER_CONNECTION=2 \
-  -e NCCL_IB_SPLIT_DATA_ON_QPS=0
+  -e UCX_TLS=rc
+```
+
+**Note:** This command does NOT include NCCL debug output. To enable debug logging, add:
+```bash
+  -e NCCL_DEBUG=INFO \
+  -e NCCL_DEBUG_SUBSYS=INIT,NET
 ```
 
 ### Command Options Explained
@@ -130,8 +175,10 @@ runai mpi submit nccl-test1 \
 
 #### Network Annotation
 - **`--annotation k8s.v1.cni.cncf.io/networks=...`** - Attaches secondary network interfaces
-  - Maps each InfiniBand device as a network attachment
-  - Must match the extended resources requested above
+  - Maps each InfiniBand device as a network attachment via Multus CNI
+  - Uses `network-operator` namespace and `-sriovnet` suffix for NAD names
+  - Format: `network-operator/ibp<PCI>s0-sriovnet` (e.g., `network-operator/ibp192s0-sriovnet`)
+  - Must match the extended resources requested above (8 IB interfaces per B200 node)
 
 #### MPI Configuration (--master-args)
 
@@ -170,12 +217,33 @@ The `--master-args` parameter contains arguments passed directly to `mpirun`. He
 
 #### Environment Variables
 
+**CUDA Configuration:**
 - **`CUDA_DEVICE_MAX_CONNECTIONS=1`** - Limits CUDA streams for better NCCL performance
+
+**InfiniBand Configuration:**
+- **`NCCL_IB_DISABLE=0`** - Explicitly enable InfiniBand (critical)
+- **`NCCL_IB_HCA=mlx5`** - Auto-detect all mlx5_* devices (wildcard pattern for 8 IB adapters)
+- **`NCCL_IB_QPS_PER_CONNECTION=2`** - Queue pairs per IB connection
+  - **[TWEAK]** Higher values (4, 8) can improve bandwidth but use more resources
+- **`NCCL_IB_SPLIT_DATA_ON_QPS=0`** - Don't split data across queue pairs
+- **`NCCL_IB_ADAPTIVE_ROUTING=1`** - Enable adaptive routing for better fabric utilization
+- **`NCCL_IB_SL=1`** - Service level for QoS on InfiniBand fabric
+
+**Performance Configuration:**
+- **`NCCL_NET_GDR_LEVEL=5`** - Enable GPUDirect RDMA (GPU ↔ IB direct access)
+- **`NCCL_NVLS_ENABLE=1`** - **[CRITICAL FOR B200]** Enable NVLink Switch
+- **`NCCL_ALGO=RING`** - Use ring algorithm for collectives
 - **`NCCL_SOCKET_IFNAME=eth0`** - Primary network interface for NCCL bootstrap
 - **`NCCL_ASYNC_ERROR_HANDLING=1`** - Enables async error handling for better debugging
-- **`NCCL_IB_QPS_PER_CONNECTION=2`** - **[TWEAK]** Queue pairs per IB connection
-  - Higher values (4, 8) can improve bandwidth but use more resources
-- **`NCCL_IB_SPLIT_DATA_ON_QPS=0`** - Disables splitting data across QPs (for testing)
+
+**MPI/UCX Configuration:**
+- **`UCX_TLS=rc`** - Use reliable connection transport for MPI (InfiniBand RC)
+  - Note: `UCX_NET_DEVICES` is intentionally NOT set (causes errors with wildcard patterns)
+
+**Debug Configuration (optional, use `--debug` flag):**
+- **`NCCL_DEBUG=INFO`** - Enable detailed NCCL logging
+- **`NCCL_DEBUG_SUBSYS=INIT,NET`** - Focus on initialization and network subsystems
+  - **Performance Impact:** Debug output adds overhead, disabled by default
 
 ### Common Tweaks
 
