@@ -43,6 +43,106 @@ python3 snapshot.py
 - Troubleshooting reference
 - Compliance documentation
 
+## Network Operator Health Check Script
+
+### `healthcheck_network-operator.py`
+
+A comprehensive pre-flight check script that validates all NVIDIA Network Operator components required for successful multi-node NCCL tests on B200 systems. **Run this before launching NCCL tests** to ensure your environment is properly configured.
+
+**Usage:**
+```bash
+# Check specific nodes
+python3 healthcheck_network-operator.py --nodes dgx030,dgx031
+
+# Check all GPU nodes automatically
+python3 healthcheck_network-operator.py
+
+# Skip SSH-based node checks (useful if passwordless SSH is not configured)
+python3 healthcheck_network-operator.py --skip-ssh
+```
+
+**What it checks:**
+
+1. **Network Operator Deployment**
+   - Helm release status
+   - Operator controller pods running
+   - NicClusterPolicy exists and is ready
+
+2. **SR-IOV Configuration**
+   - SriovNetworkNodeState shows "Succeeded" for all nodes
+   - All 8 InfiniBand extended resources available on each node (nvidia.com/resibp*)
+   - Each resource has quantity of 8 VFs
+
+3. **NV-IPAM (IP Address Management)**
+   - nv-ipam pods running
+   - Correct image name (nvidia-k8s-ipam, not nv-ipam)
+   - 8 IPPools configured with perNodeBlockSize=8
+
+4. **RDMA Shared Device Plugin**
+   - rdma-shared-dp pods running on all GPU nodes
+   - rdma_shared_device_a resources available (required for NCCL)
+
+5. **Secondary Network Components**
+   - Multus CNI deployed (required for network attachments)
+   - CNI plugins deployed
+   - Whereabouts IPAM deployed
+
+6. **Network Attachment Definitions**
+   - All 8 NADs present in network-operator namespace
+   - Correct naming convention (ibp*s0-sriovnet suffix)
+
+7. **Node-Level Checks (via SSH)**
+   - Virtual Functions activated on all 8 IB interfaces (sriov_numvfs=8)
+   - InfiniBand ports in Active state with valid LIDs
+   - No ports showing base lid 0xffff (disconnected from fabric)
+
+**Output:**
+- Color-coded status indicators (✅ PASS, ⚠️ WARN, ❌ FAIL)
+- Detailed information for each check
+- Clear summary of any issues found
+- Exit code 0 if all checks pass, 1 if any failures
+
+**Example Output:**
+```
+================================================================================
+NVIDIA Network Operator Health Check for B200 NCCL Workloads
+================================================================================
+
+Target Nodes: dgx030, dgx031
+
+================================================================================
+1. Network Operator Deployment
+================================================================================
+✅ PASS Network Operator deployed
+    Chart: network-operator-25.7.0, Status: deployed
+✅ PASS Network Operator pods running (2/2)
+✅ PASS NicClusterPolicy is ready
+    state-multus-cni: ready
+    state-rdma-device-plugin: ready
+    state-nv-ipam-cni: ready
+
+================================================================================
+Health Check Summary
+================================================================================
+
+✅ ALL CHECKS PASSED
+
+The Network Operator is properly configured for NCCL workloads.
+You can proceed with running b200_runai_nccl_test.py
+```
+
+**When to use:**
+- Before running NCCL tests to avoid failures
+- After Network Operator upgrades
+- After adding new nodes to the cluster
+- When troubleshooting NCCL performance issues
+- To validate SR-IOV and InfiniBand configuration
+
+**Prerequisites:**
+- kubectl configured with cluster admin access
+- Passwordless SSH to GPU nodes (unless using --skip-ssh)
+- Python 3.6+
+
 ## NCCL Test Script
 
 ### `b200_runai_nccl_test.py`
@@ -285,14 +385,16 @@ kubectl logs -f nccl-test1-worker-1 -n runai-<project>
 
 ```
 .
-├── b200_runai_nccl_test.py    # NCCL test runner script
-├── snapshot.py                # Environment discovery/snapshot script
-├── overview.py                # Environment overview script
-├── .logs/                     # Output directory (git-ignored)
-│   ├── snapshot.md            # Snapshot output
-│   └── nccl-test1_*.log       # NCCL test logs (timestamped)
-├── .gitignore                 # Git exclusions
-└── README.md                  # This file
+├── healthcheck_network-operator.py  # Network Operator health check script
+├── b200_runai_nccl_test.py          # NCCL test runner script
+├── snapshot.py                      # Environment discovery/snapshot script
+├── overview.py                      # Environment overview script
+├── NetworkOperator-24.7.0-to-25.7.0-Upgrade.md  # Network Operator upgrade/troubleshooting guide
+├── .logs/                           # Output directory (git-ignored)
+│   ├── snapshot.md                  # Snapshot output
+│   └── nccl-test*_*.log             # NCCL test logs (timestamped)
+├── .gitignore                       # Git exclusions
+└── README.md                        # This file
 ```
 
 ## Naming Convention
