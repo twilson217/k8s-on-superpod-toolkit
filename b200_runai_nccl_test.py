@@ -263,8 +263,9 @@ def run_nccl_test(project_name, num_nodes):
         ),
         "--image-pull-policy", "IfNotPresent",
         "--annotation", (
-            "k8s.v1.cni.cncf.io/networks=default/ibp192s0,default/ibp206s0,default/ibp154s0,"
-            "default/ibp220s0,default/ibp24s0,default/ibp64s0,default/ibp79s0,default/ibp94s0"
+            "k8s.v1.cni.cncf.io/networks=network-operator/ibp192s0-sriovnet,network-operator/ibp206s0-sriovnet,"
+            "network-operator/ibp154s0-sriovnet,network-operator/ibp220s0-sriovnet,network-operator/ibp24s0-sriovnet,"
+            "network-operator/ibp64s0-sriovnet,network-operator/ibp79s0-sriovnet,network-operator/ibp94s0-sriovnet"
         ),
         # NCCL Configuration - Based on working Slurm B200 configuration
         "-e", "CUDA_DEVICE_MAX_CONNECTIONS=1",
