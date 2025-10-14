@@ -460,6 +460,517 @@ The correct image naming convention for NVIDIA Network Operator 25.x releases:
 - **Correct**: `nvidia-k8s-ipam`
 - **Incorrect**: `nv-ipam`, `nv-ipam-controller`, `ipam-controller`
 
+## Resolution Part 4: Enabling RDMA Shared Device Plugin
+
+### Root Cause #4: Missing RDMA Device Plugin Configuration
+
+After successfully deploying SR-IOV VFs and NV-IPAM, NCCL tests were still unable to utilize InfiniBand for inter-GPU communication. The pods showed:
+- `/dev/infiniband/uverbs*` devices were present in the pods
+- NCCL logs reported: `NET/IB : No device found.` and fell back to `Using network Socket`
+- UCX warnings: `network device 'mlx5:1' is not available`
+
+**Investigation revealed:**
+```bash
+kubectl get pods -n network-operator | grep rdma-device-plugin
+# No results - the RDMA device plugin was not deployed!
+```
+
+Checking the NicClusterPolicy status:
+```bash
+kubectl get nicclusterpolicies.mellanox.com -n network-operator -o yaml
+```
+
+Showed that the RDMA device plugin state was **ignored**:
+```yaml
+status:
+  appliedStates:
+  - name: state-RDMA-device-plugin
+    state: ignore    # ❌ NOT DEPLOYED
+```
+
+### Problem Analysis
+
+The `rdmaSharedDevicePlugin` was explicitly disabled in the initial Helm values (from Resolution Part 1):
+```yaml
+rdmaSharedDevicePlugin:
+  deploy: false    # ❌ INCORRECT - This prevents NCCL from discovering IB devices
+```
+
+**Why RDMA Device Plugin is Required:**
+- NCCL and other RDMA applications need proper device enumeration
+- The RDMA device plugin exposes InfiniBand devices as Kubernetes extended resources
+- Without it, applications can see `/dev/infiniband/uverbs*` but cannot properly initialize RDMA communication
+- The plugin creates the necessary device mappings and resource allocation for RDMA workloads
+
+### Solution: Enable RDMA Shared Device Plugin in NicClusterPolicy
+
+The RDMA device plugin must be enabled in the `NicClusterPolicy` resource. Edit the existing policy:
+
+```bash
+kubectl edit nicclusterpolicies.mellanox.com nic-cluster-policy
+```
+
+Add the `rdmaSharedDevicePlugin` configuration to the spec:
+
+```yaml
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+spec:
+  nvIpam:
+    image: nvidia-k8s-ipam
+    repository: ghcr.io/mellanox
+    version: v0.2.0
+    imagePullSecrets: []
+    enableWebhook: false
+  
+  # Add RDMA Shared Device Plugin configuration
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    version: network-operator-v25.7.0
+    config: |
+      {
+        "configList": [
+          {
+            "resourceName": "rdma_shared_device_a",
+            "rdmaHcaMax": 63,
+            "selectors": {
+              "vendors": ["15b3"]
+            }
+          }
+        ]
+      }
+```
+
+**Configuration Details:**
+- **`resourceName`**: Name of the Kubernetes extended resource (`rdma_shared_device_a`)
+- **`rdmaHcaMax`**: Maximum number of RDMA resources per device (63 is recommended)
+- **`selectors.vendors`**: `["15b3"]` is the PCI vendor ID for Mellanox/NVIDIA devices
+  - This auto-discovers all Mellanox InfiniBand devices across all nodes
+  - Device-specific configuration is not required (avoids issues with varying `mlx5_*` numbers)
+
+### Common Configuration Mistakes to Avoid
+
+#### ❌ Mistake 1: Empty Selectors
+```yaml
+# WRONG - Will cause plugin to crash
+"selectors": {
+  "vendors": [],
+  "deviceIDs": [],
+  "drivers": [],
+  "linkTypes": []
+}
+```
+
+**Error**: `configuration missmatch. neither "selectors" nor "devices" fields exits`
+
+#### ❌ Mistake 2: Missing rdmaHcaMax Value
+```yaml
+# WRONG - Invalid JSON
+"rdmaHcaMax":
+```
+
+**Error**: `invalid character '}' after array element`
+
+#### ❌ Mistake 3: Hardcoded Device Names
+```yaml
+# WRONG - Device numbers vary by node
+"devices": ["mlx5_15", "mlx5_10", "mlx5_14", "mlx5_13"]
+```
+
+**Problem**: Device numbers (`mlx5_X`) are different on each node and can change between reboots.
+
+#### ✅ Correct: Use Vendor Selector
+```yaml
+# CORRECT - Auto-discovers all Mellanox devices
+"selectors": {
+  "vendors": ["15b3"]
+}
+```
+
+### Verification After Enabling RDMA Device Plugin
+
+#### 1. Check RDMA Device Plugin Pods
+```bash
+kubectl get pods -n network-operator -l app=rdma-shared-dp
+```
+
+Expected output:
+```
+NAME                      READY   STATUS    RESTARTS   AGE
+rdma-shared-dp-ds-xxxxx   1/1     Running   0          2m
+rdma-shared-dp-ds-yyyyy   1/1     Running   0          2m
+...
+```
+
+#### 2. Check Plugin Logs
+```bash
+kubectl logs -n network-operator -l app=rdma-shared-dp --tail=20
+```
+
+Expected output (successful discovery):
+```
+Starting K8s RDMA Shared Device Plugin version= master
+resource manager reading configs
+Reading /k8s-rdma-shared-dev-plugin/config.json
+loaded config: [{ResourceName:rdma_shared_device_a ... Selectors:{Vendors:[15b3]}}]
+Discovering RDMA devices...
+Found devices: [mlx5_0 mlx5_1 mlx5_2 ...]
+```
+
+#### 3. Verify Extended Resources on Nodes
+```bash
+kubectl get nodes -o json | jq '.items[] | {
+  name: .metadata.name,
+  rdma: .status.allocatable | with_entries(select(.key | startswith("rdma")))
+}'
+```
+
+Expected output:
+```json
+{
+  "name": "dgx030",
+  "rdma": {
+    "rdma/rdma_shared_device_a": "500"
+  }
+}
+```
+
+#### 4. Test NCCL with InfiniBand
+Run the NCCL test and check the logs:
+```bash
+kubectl logs <nccl-test-pod> | grep -i "net/ib"
+```
+
+Expected output (successful InfiniBand usage):
+```
+NET/IB : Using [0]mlx5_20:1/IB [RO]; OOB ibv0:<0>
+NET/IB : Using [1]mlx5_24:1/IB [RO]; OOB ibv1:<0>
+...
+NCCL version 2.x.x+cuda12.x
+```
+
+**No longer seeing**: `NET/IB : No device found.` or `Using network Socket`
+
+### Integration with NCCL Environment Variables
+
+With the RDMA device plugin enabled, update your NCCL job configurations to use wildcard patterns:
+
+```bash
+# In your job YAML or Python script
+NCCL_IB_HCA=mlx5              # Auto-detect all mlx5_* devices (wildcard)
+UCX_NET_DEVICES=mlx5:1        # Auto-detect all mlx5_* devices on port 1
+NCCL_DEBUG=INFO               # Enable logging to verify IB usage
+```
+
+**Note**: The wildcard patterns (`mlx5` instead of `mlx5_15,mlx5_10,...`) work correctly once the RDMA device plugin is running and properly exposes the devices to NCCL.
+
+### Troubleshooting RDMA Device Plugin Issues
+
+If the `rdma-shared-dp` pods are crash-looping:
+
+#### Check ConfigMap Generated by Network Operator
+```bash
+kubectl get configmap rdma-devices -n network-operator -o yaml
+```
+
+The ConfigMap should contain valid JSON:
+```yaml
+data:
+  config.json: |
+    {
+      "configList": [
+        {
+          "resourceName": "rdma_shared_device_a",
+          "rdmaHcaMax": 63,
+          "selectors": {
+            "vendors": ["15b3"]
+          }
+        }
+      ]
+    }
+```
+
+#### Validate JSON Syntax
+```bash
+kubectl get configmap rdma-devices -n network-operator -o jsonpath='{.data.config\.json}' | jq .
+```
+
+If `jq` returns an error, the JSON is invalid and needs to be corrected in the NicClusterPolicy.
+
+#### Check for Empty Arrays
+Look for empty selector arrays in the plugin logs:
+```bash
+kubectl logs -n network-operator <rdma-shared-dp-pod>
+```
+
+If you see:
+```
+Selectors:{Vendors:[] DeviceIDs:[] Drivers:[] IfNames:[] LinkTypes:[]}
+error: configuration missmatch. neither "selectors" nor "devices" fields exits
+```
+
+This means the Network Operator added empty arrays as defaults. Fix by explicitly setting `vendors: ["15b3"]`.
+
+### Secondary Network Components Configuration
+
+#### Root Cause #5: Missing Secondary Network Components
+
+After enabling the RDMA device plugin, the final piece required for NCCL to use InfiniBand was ensuring the **secondary network components** were properly configured in the `NicClusterPolicy`. These components are responsible for attaching SR-IOV VF interfaces to pods.
+
+**Investigation revealed:**
+
+The Network Operator 24.7.0 deployment had secondary network components enabled in the Helm values:
+```yaml
+secondaryNetwork:
+  deploy: true
+  cniPlugins:
+    deploy: true
+  multus:
+    deploy: true
+  ipamPlugin:
+    deploy: false  # Using nv-ipam instead
+```
+
+However, these components must **also be configured in the `NicClusterPolicy`** in Network Operator 25.7.0 to be properly deployed and managed.
+
+#### Why Secondary Network Components are Required
+
+These three components work together to enable SR-IOV networking in Kubernetes:
+
+1. **Multus CNI**
+   - Meta-plugin that enables attaching multiple network interfaces to pods
+   - Reads the `k8s.v1.cni.cncf.io/networks` annotation from pod specs
+   - Without Multus, pods only get the default `eth0` interface
+   - **Critical**: Your NCCL jobs use this annotation to request InfiniBand VF interfaces
+
+2. **CNI Plugins**
+   - Provides the actual CNI binaries (bridge, host-device, ipvlan, etc.)
+   - Required by Multus to configure secondary interfaces
+   - Handles the low-level network interface attachment
+
+3. **Whereabouts IPAM** (optional, but recommended)
+   - IP Address Management plugin for secondary networks
+   - Can work alongside nv-ipam for different network types
+   - Provides IP allocation for secondary interfaces that don't use nv-ipam
+
+**Note**: In this deployment, `nv-ipam` handles IP allocation for InfiniBand VFs, while whereabouts provides flexibility for other secondary network types.
+
+#### Solution: Add Secondary Network Components to NicClusterPolicy
+
+According to the [NVIDIA Network Operator 25.7.0 deployment guide](https://docs.nvidia.com/networking/display/kubernetes2570/deployment-guide-kubernetes.html#network-operator-deployment-with-a-secondary-network), secondary network components must be configured in the `NicClusterPolicy`.
+
+Edit the `NicClusterPolicy`:
+
+```bash
+kubectl edit nicclusterpolicies.mellanox.com nic-cluster-policy
+```
+
+Add the `secondaryNetwork` section to the spec:
+
+```yaml
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+spec:
+  nvIpam:
+    image: nvidia-k8s-ipam
+    repository: ghcr.io/mellanox
+    version: v0.2.0
+    imagePullSecrets: []
+    enableWebhook: false
+  
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    version: network-operator-v25.7.0
+    config: |
+      {
+        "configList": [
+          {
+            "resourceName": "rdma_shared_device_a",
+            "rdmaHcaMax": 63,
+            "selectors": {
+              "vendors": ["15b3"]
+            }
+          }
+        ]
+      }
+  
+  # Add Secondary Network Components
+  secondaryNetwork:
+    cniPlugins:
+      image: plugins
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v25.7.0
+      imagePullSecrets: []
+    multus:
+      image: multus-cni
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v25.7.0
+      imagePullSecrets: []
+    ipamPlugin:
+      image: whereabouts
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v25.7.0
+      imagePullSecrets: []
+```
+
+#### Verification After Enabling Secondary Network Components
+
+##### 1. Check Multus DaemonSet
+```bash
+kubectl get pods -n network-operator | grep multus
+```
+
+Expected output:
+```
+kube-multus-ds-xxxxx   1/1   Running   0   5m
+kube-multus-ds-yyyyy   1/1   Running   0   5m
+```
+
+##### 2. Check CNI Plugins DaemonSet
+```bash
+kubectl get pods -n network-operator | grep cni-plugins
+```
+
+Expected output:
+```
+cni-plugins-ds-xxxxx   1/1   Running   0   5m
+cni-plugins-ds-yyyyy   1/1   Running   0   5m
+```
+
+##### 3. Check Whereabouts IPAM DaemonSet
+```bash
+kubectl get pods -n network-operator | grep whereabouts
+```
+
+Expected output:
+```
+whereabouts-xxxxx   1/1   Running   0   5m
+whereabouts-yyyyy   1/1   Running   0   5m
+```
+
+##### 4. Verify Multus Configuration
+```bash
+kubectl get network-attachment-definitions -A
+```
+
+This should list your SR-IOV IB network definitions (e.g., `ibp192s0`, `ibp206s0`, etc.).
+
+##### 5. Test with NCCL Job
+
+Run your NCCL test job and verify that the pods receive the InfiniBand VF interfaces:
+
+```bash
+# Get a running NCCL worker pod
+kubectl exec -n runai-test <nccl-worker-pod> -- ip addr show
+
+# Should see interfaces like:
+# - eth0 (default network)
+# - net1, net2, net3... (SR-IOV VF interfaces)
+```
+
+Check NCCL logs for InfiniBand usage:
+```bash
+kubectl logs <nccl-test-pod> | grep -E "NET/IB|Using.*mlx5"
+```
+
+Expected output (successful InfiniBand usage):
+```
+NET/IB : Using [0]mlx5_20:1/IB [RO]; OOB ibv0:<0>
+NET/IB : Using [1]mlx5_24:1/IB [RO]; OOB ibv1:<0>
+...
+```
+
+#### How These Components Work Together
+
+The complete data flow for NCCL over InfiniBand in Kubernetes:
+
+1. **Job Submission**: Your `b200_runai_nccl_test.py` script submits a job with:
+   - SR-IOV resource requests (`nvidia.com/resibp24s0=1`, etc.)
+   - Network annotation (`k8s.v1.cni.cncf.io/networks=default/ibp192s0,...`)
+
+2. **Pod Scheduling**: Kubernetes scheduler places the pod on a node with available:
+   - SR-IOV VF resources (exposed by SR-IOV device plugin)
+   - RDMA resources (exposed by RDMA device plugin)
+
+3. **Network Attachment**: When the pod starts:
+   - **Multus** reads the `k8s.v1.cni.cncf.io/networks` annotation
+   - **CNI plugins** attach the SR-IOV VF interfaces to the pod
+   - **nv-ipam** allocates IP addresses to the VF interfaces
+   - Pod now has multiple network interfaces (eth0 + IB VFs)
+
+4. **NCCL Initialization**: Inside the pod:
+   - NCCL environment variables (`NCCL_IB_HCA=mlx5`, etc.) guide device selection
+   - **RDMA device plugin** has exposed the IB devices properly
+   - NCCL finds and uses the InfiniBand interfaces for GPU-to-GPU communication
+
+**Without any one of these components**, NCCL cannot use InfiniBand:
+- No Multus → VF interfaces not attached to pods
+- No RDMA device plugin → NCCL reports "No device found"
+- No nv-ipam → VF interfaces have no IP addresses
+- No SR-IOV configuration → No VFs created
+
+#### Complete NicClusterPolicy Example
+
+For reference, here is the complete `NicClusterPolicy` configuration with all components enabled:
+
+```yaml
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+  namespace: network-operator
+spec:
+  # NV-IPAM for InfiniBand VF IP allocation
+  nvIpam:
+    image: nvidia-k8s-ipam
+    repository: ghcr.io/mellanox
+    version: v0.2.0
+    imagePullSecrets: []
+    enableWebhook: false
+  
+  # RDMA Device Plugin for NCCL device discovery
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    version: network-operator-v25.7.0
+    config: |
+      {
+        "configList": [
+          {
+            "resourceName": "rdma_shared_device_a",
+            "rdmaHcaMax": 63,
+            "selectors": {
+              "vendors": ["15b3"]
+            }
+          }
+        ]
+      }
+  
+  # Secondary Network Components for VF interface attachment
+  secondaryNetwork:
+    cniPlugins:
+      image: plugins
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v25.7.0
+      imagePullSecrets: []
+    multus:
+      image: multus-cni
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v25.7.0
+      imagePullSecrets: []
+    ipamPlugin:
+      image: whereabouts
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v25.7.0
+      imagePullSecrets: []
+```
+
 ## Key Learnings
 
 ### 1. Firmware Changes Require Cold Reboot
@@ -497,6 +1008,22 @@ The correct image naming convention for NVIDIA Network Operator 25.x releases:
 - This change was not well documented in the 25.7.0 release notes
 - Using the wrong image name causes `ImagePullBackOff` errors
 - The correct configuration can be found in the 25.1.0 documentation
+
+### 7. RDMA Device Plugin is Essential for NCCL
+- Having `/dev/infiniband/uverbs*` devices in pods is **not sufficient** for NCCL to use InfiniBand
+- The RDMA Shared Device Plugin must be enabled in the `NicClusterPolicy` to expose devices properly
+- Without the plugin, NCCL reports `NET/IB : No device found.` and falls back to TCP/Socket
+- Use vendor selector (`vendors: ["15b3"]`) for auto-discovery across all nodes
+- Avoid hardcoding device names or using empty selector arrays
+- The plugin is configured separately from SR-IOV device plugin and serves a different purpose
+
+### 8. Secondary Network Components Must Be Configured in NicClusterPolicy
+- In Network Operator 25.7.0, secondary network components (Multus, CNI plugins, whereabouts) must be configured in the `NicClusterPolicy`, not just in Helm values
+- **Multus CNI** is critical for attaching SR-IOV VF interfaces to pods via the `k8s.v1.cni.cncf.io/networks` annotation
+- Without Multus, pods requesting secondary networks will only receive the default `eth0` interface
+- All three components (Multus, CNI plugins, IPAM) must be present for SR-IOV networking to function
+- This configuration matches the pattern used in Network Operator 24.7.0 but with updated syntax for 25.7.0
+- Reference: [NVIDIA Network Operator 25.7.0 Secondary Network Configuration](https://docs.nvidia.com/networking/display/kubernetes2570/deployment-guide-kubernetes.html#network-operator-deployment-with-a-secondary-network)
 
 ## Troubleshooting Tips for Future Issues
 
@@ -566,5 +1093,19 @@ kubectl get sriovnetworknodepolicy -n network-operator
 ---
 
 **Document Created**: October 7, 2025  
-**Last Updated**: October 13, 2025  
-**Status**: Resolved - Both nodes (dgx030, dgx031) operational with SR-IOV VFs active and nv-ipam functioning correctly
+**Last Updated**: October 14, 2025  
+**Status**: ✅ Fully Resolved and Performance Validated
+
+Both nodes (dgx030, dgx031) are operational with complete Network Operator 25.7.0 configuration:
+- SR-IOV VFs active (8 per HCA, 64 total per node)
+- NV-IPAM functioning correctly with proper image name (`nvidia-k8s-ipam`)
+- RDMA Shared Device Plugin enabled for NCCL device discovery
+- Secondary network components deployed (Multus, CNI plugins, whereabouts IPAM)
+- Network Attachment Definitions created in `network-operator` namespace with `-sriovnet` suffix
+- All components verified and showing `state: ready` in NicClusterPolicy status
+
+**NCCL Performance Validation**:
+- Multi-node NCCL tests successfully using InfiniBand with SHARP enabled
+- Achieved **388.66 GB/s** average bus bandwidth on 2-node (16 GPU) tests
+- NCCL correctly detecting and using all 8 InfiniBand adapters per node
+- Optimized configuration deployed in `b200_runai_nccl_test_v2.py` with additional tuning parameters
