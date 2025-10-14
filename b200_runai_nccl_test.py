@@ -3,10 +3,11 @@
 Script to run multi-node NCCL tests in a RunAI environment.
 
 Usage:
-    python run_nccl_test.py --project <PROJECT_NAME> --nodes <NUM_NODES>
+    python b200_runai_nccl_test.py --project <PROJECT_NAME> --nodes <NUM_NODES> [--debug]
 
 Example:
-    python run_nccl_test.py --project test --nodes 2
+    python b200_runai_nccl_test.py --project test --nodes 2
+    python b200_runai_nccl_test.py --project test --nodes 2 --debug
 """
 
 import argparse
@@ -202,13 +203,14 @@ def capture_logs_for_job(namespace, job_name, num_nodes):
     time.sleep(2)
 
 
-def run_nccl_test(project_name, num_nodes):
+def run_nccl_test(project_name, num_nodes, debug=False):
     """
     Run NCCL test using RunAI MPI submit command.
     
     Args:
         project_name: Name of the RunAI project
         num_nodes: Number of worker nodes to use
+        debug: Enable NCCL debug output (default: False)
     """
     
     # First, configure the project
@@ -251,14 +253,14 @@ def run_nccl_test(project_name, num_nodes):
         "--master-command", "mpirun",
         "--master-args", (
             f"--allow-run-as-root --bind-to none -map-by slot -np {total_processes} "
-            "-x NCCL_DEBUG -x NCCL_DEBUG_SUBSYS "
-            "-x NCCL_IB_DISABLE -x NCCL_IB_HCA -x NCCL_IB_GID_INDEX "
+            f"{'-x NCCL_DEBUG -x NCCL_DEBUG_SUBSYS ' if debug else ''}"
+            "-x NCCL_IB_DISABLE -x NCCL_IB_HCA "
             "-x NCCL_IB_QPS_PER_CONNECTION -x NCCL_IB_SPLIT_DATA_ON_QPS "
             "-x NCCL_IB_ADAPTIVE_ROUTING -x NCCL_IB_SL "
             "-x NCCL_NET_GDR_LEVEL -x NCCL_NVLS_ENABLE -x NCCL_ALGO "
             "-x NCCL_SOCKET_IFNAME -x NCCL_ASYNC_ERROR_HANDLING "
             "-x CUDA_DEVICE_MAX_CONNECTIONS "
-            "-x UCX_TLS -x UCX_NET_DEVICES "
+            "-x UCX_TLS "
             "-mca pml ob1 -mca btl self,tcp all_reduce_perf_mpi -b 1G -e 16G -f 2 -n 100 -g 1"
         ),
         "--image-pull-policy", "IfNotPresent",
@@ -269,8 +271,17 @@ def run_nccl_test(project_name, num_nodes):
         ),
         # NCCL Configuration - Based on working Slurm B200 configuration
         "-e", "CUDA_DEVICE_MAX_CONNECTIONS=1",
-        "-e", "NCCL_DEBUG=INFO",  # Enable debug output for troubleshooting
-        "-e", "NCCL_DEBUG_SUBSYS=INIT,NET",  # Focus on initialization and network subsystems
+    ]
+    
+    # Add debug settings if enabled
+    if debug:
+        submit_cmd.extend([
+            "-e", "NCCL_DEBUG=INFO",  # Enable debug output for troubleshooting
+            "-e", "NCCL_DEBUG_SUBSYS=INIT,NET",  # Focus on initialization and network subsystems
+        ])
+    
+    # InfiniBand and performance configuration
+    submit_cmd.extend([
         # InfiniBand Configuration
         "-e", "NCCL_IB_DISABLE=0",  # Explicitly enable InfiniBand
         "-e", "NCCL_IB_HCA=mlx5",  # Auto-detect all mlx5_* devices (wildcard pattern)
@@ -286,8 +297,7 @@ def run_nccl_test(project_name, num_nodes):
         "-e", "NCCL_ASYNC_ERROR_HANDLING=1",
         # UCX Configuration for MPI transport
         "-e", "UCX_TLS=rc",  # Use reliable connection transport
-        "-e", "UCX_NET_DEVICES=mlx5:1"  # Auto-detect all mlx5_* devices on port 1 (wildcard pattern)
-    ]
+    ])
     
     print(f"\nSubmitting NCCL test with {num_nodes} nodes ({total_processes} total processes)...")
     print(f"Command: {' '.join(submit_cmd)}\n")
@@ -313,8 +323,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python run_nccl_test.py --project test --nodes 2
-  python run_nccl_test.py --project my-project --nodes 4
+  # Run NCCL test (debug output disabled by default)
+  python b200_runai_nccl_test.py --project test --nodes 2
+  
+  # Run NCCL test with debug output enabled
+  python b200_runai_nccl_test.py --project test --nodes 2 --debug
+  
+  # Run on 4 nodes
+  python b200_runai_nccl_test.py --project my-project --nodes 4
         """
     )
     
@@ -332,13 +348,19 @@ Examples:
         help="Number of worker nodes to use (each node has 8 GPUs)"
     )
     
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable NCCL debug output (NCCL_DEBUG=INFO, NCCL_DEBUG_SUBSYS=INIT,NET)"
+    )
+    
     args = parser.parse_args()
     
     if args.nodes < 1:
         print("Error: Number of nodes must be at least 1", file=sys.stderr)
         return 1
     
-    return run_nccl_test(args.project, args.nodes)
+    return run_nccl_test(args.project, args.nodes, debug=args.debug)
 
 
 if __name__ == "__main__":
