@@ -1,6 +1,9 @@
 # Logs directory - contains environment snapshots and discovery outputs
 .logs/
 
+# Local documentation that should not be synced
+.nosync/
+
 # Cursor chat exports
 cursorchats/
 
