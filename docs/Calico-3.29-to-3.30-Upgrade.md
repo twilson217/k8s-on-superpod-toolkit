@@ -446,6 +446,42 @@ kubectl logs -n network-operator <network-operator-controller-manager-pod> --tai
 
 **Result:** ✅ **PASSED** - Bandwidth looking good, normal performance confirmed
 
+#### 4.6 Clean Up Orphaned Network Interfaces
+
+**Known Issue:** Calico upgrades can leave orphaned network interfaces that cause routing conflicts when creating new pods. This manifests as errors like:
+
+```
+error adding container to network: error adding host side routes for interface: 
+calibbeb89f3e13, error: route (Ifindex: 283, Dst: 172.16.106.10/32, Scope: link) 
+already exists for an interface other than 'calibbeb89f3e13'
+```
+
+**Solution:** Run the cleanup script to identify and remove orphaned interfaces:
+
+```bash
+# Check all nodes for orphaned interfaces (dry-run)
+/home/travisw/dev/k8s-on-superpod-toolkit/fix-calico-interfaces.py --dry-run --verbose
+
+# If orphaned interfaces are found, clean them up
+/home/travisw/dev/k8s-on-superpod-toolkit/fix-calico-interfaces.py --auto-fix
+
+# Or check a specific node
+/home/travisw/dev/k8s-on-superpod-toolkit/fix-calico-interfaces.py --node dgx031 --verbose
+```
+
+**What It Does:**
+1. Gets all running pods and their IPs from Kubernetes
+2. Checks each node for Calico interface routes
+3. Identifies interfaces pointing to IPs without running pods
+4. Safely removes orphaned interfaces
+
+**When to Run:**
+- Immediately after Calico upgrade
+- If seeing "route already exists" errors during pod creation
+- As part of regular maintenance (recommended: weekly)
+
+**Reference:** See [Known Issues](#known-issues-workarounds) section below.
+
 ---
 
 ## Post-Upgrade State
@@ -582,6 +618,11 @@ For future Calico upgrades:
    - Keep old version in BCM during monitoring period
    - Delete old version only after stability confirmed
 
+5. **Clean up orphaned interfaces**
+   - Run `fix-calico-interfaces.py` immediately after upgrade completes
+   - Check for "route already exists" errors in pod events
+   - Schedule regular cleanup (weekly recommended)
+
 ---
 
 ## Timeline
@@ -611,6 +652,7 @@ For future Calico upgrades:
 ### Immediate
 
 - [x] Complete NCCL test ✅
+- [x] Run interface cleanup check: `./fix-calico-interfaces.py --dry-run --verbose` ✅
 - [ ] Monitor cluster for 24 hours
 - [x] Verify Run:AI workload scheduling ✅
 
@@ -656,11 +698,63 @@ See: `/home/travisw/dev/k8s-on-superpod-toolkit/.logs/k8s-high-level-upgrade-pla
 
 ---
 
+## Known Issues & Workarounds
+
+### Issue: Orphaned Calico Network Interfaces
+
+**Symptoms:**
+- New pods fail to start with "route already exists" errors
+- Error message: `error adding host side routes for interface: caliXXX, error: route already exists for an interface other than 'caliXXX'`
+- Pods stuck in `ContainerCreating` or rapid `CrashLoopBackOff`
+
+**Root Cause:**
+During Calico DaemonSet rolling updates (especially upgrades like 3.29 → 3.30), calico-node pods may be terminated before they can properly clean up network interfaces. This leaves stale route entries in the kernel that conflict with new pod creation.
+
+**Known in Calico Versions:**
+- Affects upgrades from 3.29.x to 3.30.x
+- Related to: https://github.com/projectcalico/calico/issues/10582
+- Calico 3.30.x has reported network connectivity issues post-upgrade
+
+**Impact:**
+- Medium - Prevents new pods from starting on affected nodes
+- Existing pods continue running normally
+- Does not affect pod-to-pod connectivity of running workloads
+
+**Workaround:**
+
+Use the `fix-calico-interfaces.py` script to identify and clean up orphaned interfaces:
+
+```bash
+# Check for orphaned interfaces (recommended: run immediately after upgrade)
+cd /home/travisw/dev/k8s-on-superpod-toolkit
+./fix-calico-interfaces.py --dry-run --verbose
+
+# Clean up automatically if issues found
+./fix-calico-interfaces.py --auto-fix
+
+# For a specific node
+./fix-calico-interfaces.py --node <node-name> --verbose
+```
+
+**Prevention:**
+- Run the cleanup script immediately after Calico upgrades
+- Consider adding to regular maintenance schedule (weekly)
+- Monitor pod creation errors during upgrade rollout
+
+**Script Details:**
+- Location: `/home/travisw/dev/k8s-on-superpod-toolkit/fix-calico-interfaces.py`
+- Function: Identifies Calico interfaces pointing to non-existent pod IPs and removes them
+- Safety: Dry-run mode available, only removes interfaces for terminated pods
+- Created: October 14, 2025
+
+---
+
 ## References
 
 - **Calico Documentation**: https://docs.tigera.io/calico/latest/about/
 - **Calico v3.30 Release Notes**: https://github.com/projectcalico/calico/releases/tag/v3.30.3
 - **Calico K8s Compatibility**: https://docs.tigera.io/calico/latest/getting-started/kubernetes/requirements
+- **Known Issue - Connectivity Problems**: https://github.com/projectcalico/calico/issues/10582
 - **BCM Documentation**: `.nosync/bcm-docs/`
 - **Upgrade Plan**: `.logs/k8s-high-level-upgrade-plan.md`
 - **Compatibility Matrix**: `.logs/compatibility.md`
