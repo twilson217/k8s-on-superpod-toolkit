@@ -403,10 +403,10 @@ def check_ib_extended_resources(nodes: List[str]) -> CheckResult:
 
 def check_nv_ipam() -> CheckResult:
     """Check NV-IPAM deployment and configuration."""
-    # Check nv-ipam pods
+    # Check nv-ipam node pods (DaemonSet)
     exit_code, stdout, stderr = run_command([
         "kubectl", "get", "pods", "-n", "network-operator",
-        "-l", "app=nv-ipam-node", "-o", "json"
+        "-l", "component=nv-ipam-node", "-o", "json"
     ])
     
     if exit_code != 0:

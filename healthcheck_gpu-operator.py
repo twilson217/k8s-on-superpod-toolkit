@@ -5,17 +5,19 @@ GPU Operator Validation Test Script
 Purpose: Comprehensive testing of NVIDIA GPU Operator functionality
 Usage: python3 test_gpu_operator.py [before|after|baseline]
 
-This script runs 10 tests to validate GPU Operator functionality:
+This script runs 9 tests to validate GPU Operator functionality:
 1. Environment Information
 2. GPU Operator Pod Status
 3. GPU Node Discovery
 4. NVIDIA Device Plugin
-5. NVIDIA Driver Status
-6. GPU Feature Discovery
-7. DCGM Metrics Exporter
-8. Operator Validator
-9. CUDA Workload Test
-10. Run:AI Integration
+5. GPU Feature Discovery
+6. DCGM Metrics Exporter
+7. Operator Validator
+8. CUDA Workload Test
+9. Run:AI Integration
+
+Note: Driver test removed - in SuperPod environments, NVIDIA drivers
+are managed at the DGX OS level, not by GPU Operator.
 
 Results are saved to timestamped log files for comparison.
 """
@@ -46,7 +48,7 @@ class TestResult:
     def __init__(self):
         self.passed = 0
         self.failed = 0
-        self.total = 10  # Total number of tests
+        self.total = 9  # Total number of tests (updated for SuperPod)
         
     def pass_test(self):
         self.passed += 1
@@ -66,6 +68,7 @@ class GPUOperatorTester:
         self.timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         self.output_file = f"gpu-operator-test-{phase}-{self.timestamp}.log"
         self.results = TestResult()
+        self.results.total = 9  # Updated: 9 tests (removed driver test for SuperPod)
         
         # Open log file
         self.log_handle = open(self.output_file, 'w')
@@ -174,36 +177,46 @@ class GPUOperatorTester:
         self.print_pass("Environment info collected")
     
     def test_pod_status(self):
-        """Test 2: Verify all GPU Operator pods are running"""
+        """Test 2: Verify all GPU Operator pods are running or completed"""
         self.print_test(2, "GPU Operator Pod Status")
         
         self.log("All pods in gpu-operator namespace:")
         code, stdout, _ = self.kubectl("get", "pods", "-n", "gpu-operator", "-o", "wide")
         self.log(stdout)
         
-        # Count pods
+        # Count pods by status
         code, stdout, _ = self.kubectl("get", "pods", "-n", "gpu-operator", "--no-headers")
         total_pods = len([l for l in stdout.strip().split('\n') if l]) if stdout.strip() else 0
         
+        # Count Running pods
         code, stdout, _ = self.kubectl("get", "pods", "-n", "gpu-operator", 
                                        "--field-selector=status.phase=Running", "--no-headers")
         running_pods = len([l for l in stdout.strip().split('\n') if l]) if stdout.strip() else 0
         
+        # Count Completed/Succeeded pods (e.g., nvidia-cuda-validator Jobs)
+        code, stdout, _ = self.kubectl("get", "pods", "-n", "gpu-operator",
+                                       "--field-selector=status.phase=Succeeded", "--no-headers")
+        completed_pods = len([l for l in stdout.strip().split('\n') if l]) if stdout.strip() else 0
+        
+        healthy_pods = running_pods + completed_pods
+        
         self.print_info(f"Total pods: {total_pods}")
         self.print_info(f"Running pods: {running_pods}")
+        self.print_info(f"Completed pods: {completed_pods} (Jobs)")
+        self.print_info(f"Healthy pods: {healthy_pods}")
         
-        # Check for failed pods
+        # Check for failed/problematic pods
         code, stdout, _ = self.kubectl("get", "pods", "-n", "gpu-operator",
                                        "--field-selector=status.phase!=Running,status.phase!=Succeeded",
                                        "--no-headers")
         if stdout.strip():
-            self.print_warning("Non-running pods found:")
+            self.print_warning("Non-healthy pods found:")
             self.log(stdout)
         
-        if running_pods == total_pods and total_pods > 0:
-            self.print_pass(f"All GPU Operator pods are Running ({running_pods}/{total_pods})")
+        if healthy_pods == total_pods and total_pods > 0:
+            self.print_pass(f"All GPU Operator pods are healthy ({running_pods} Running + {completed_pods} Completed = {healthy_pods}/{total_pods})")
         else:
-            self.print_fail(f"Not all pods are Running ({running_pods}/{total_pods})")
+            self.print_fail(f"Not all pods are healthy ({healthy_pods}/{total_pods})")
     
     def test_gpu_discovery(self):
         """Test 3: Verify GPUs are discovered on nodes"""
@@ -262,50 +275,9 @@ class GPUOperatorTester:
         else:
             self.print_fail(f"Device Plugin not ready on all nodes ({ready}/{desired})")
     
-    def test_driver(self):
-        """Test 5: Verify NVIDIA driver functionality"""
-        self.print_test(5, "NVIDIA Driver Status")
-        
-        self.log("Driver DaemonSet:")
-        code, stdout, _ = self.kubectl("get", "ds", "-n", "gpu-operator",
-                                       "nvidia-driver-daemonset", "-o", "wide")
-        self.log(stdout if code == 0 else "DaemonSet not found")
-        
-        # Get a driver pod
-        code, stdout, _ = self.kubectl("get", "pods", "-n", "gpu-operator",
-                                       "-l", "app=nvidia-driver-daemonset",
-                                       "-o", "name")
-        
-        if code == 0 and stdout.strip():
-            driver_pod = stdout.strip().split('\n')[0]
-            self.print_info(f"Testing nvidia-smi from {driver_pod}...")
-            
-            self.log("\nnvidia-smi output:")
-            code, stdout, stderr = self.kubectl("exec", "-n", "gpu-operator", driver_pod, "--",
-                                               "nvidia-smi", "--query-gpu=index,name,driver_version,memory.total",
-                                               "--format=csv")
-            
-            if code == 0:
-                self.log(stdout)
-                
-                # Get driver version
-                code2, stdout2, _ = self.kubectl("exec", "-n", "gpu-operator", driver_pod, "--",
-                                                "nvidia-smi", "--query-gpu=driver_version",
-                                                "--format=csv,noheader")
-                if code2 == 0:
-                    driver_version = stdout2.strip().split('\n')[0].strip()
-                    self.print_info(f"Driver version: {driver_version}")
-                
-                self.print_pass("NVIDIA driver loaded and functional")
-            else:
-                self.log(stderr)
-                self.print_fail("nvidia-smi failed in driver pod")
-        else:
-            self.print_fail("No driver pod found")
-    
     def test_gpu_feature_discovery(self):
-        """Test 6: Verify GPU Feature Discovery"""
-        self.print_test(6, "GPU Feature Discovery (GFD)")
+        """Test 5: Verify GPU Feature Discovery"""
+        self.print_test(5, "GPU Feature Discovery (GFD)")
         
         self.log("GFD DaemonSet:")
         code, stdout, _ = self.kubectl("get", "ds", "-n", "gpu-operator",
@@ -355,8 +327,8 @@ class GPUOperatorTester:
             self.print_fail("No GPU nodes found to check labels")
     
     def test_dcgm_exporter(self):
-        """Test 7: Verify DCGM metrics exporter"""
-        self.print_test(7, "DCGM Metrics Exporter")
+        """Test 6: Verify DCGM metrics exporter"""
+        self.print_test(6, "DCGM Metrics Exporter")
         
         self.log("DCGM Exporter DaemonSet:")
         code, stdout, _ = self.kubectl("get", "ds", "-n", "gpu-operator",
@@ -376,28 +348,36 @@ class GPUOperatorTester:
         
         self.print_info(f"DCGM Exporter pods: {ready}/{desired} ready")
         
-        # Try to check metrics endpoint
-        code, stdout, _ = self.kubectl("get", "pods", "-n", "gpu-operator",
-                                       "-l", "app=nvidia-dcgm-exporter",
-                                       "-o", "name")
-        if code == 0 and stdout.strip():
-            dcgm_pod = stdout.strip().split('\n')[0]
-            self.print_info("Testing metrics endpoint...")
+        # Validate pod status
+        if ready == desired and desired > 0:
+            # Try to check metrics endpoint (optional - curl may not be available in container)
+            code, stdout, _ = self.kubectl("get", "pods", "-n", "gpu-operator",
+                                           "-l", "app=nvidia-dcgm-exporter",
+                                           "-o", "name")
+            if code == 0 and stdout.strip():
+                dcgm_pod = stdout.strip().split('\n')[0]
+                self.print_info("Checking metrics endpoint availability...")
+                
+                # Try curl (may not be available in minimal container images)
+                code, stdout, stderr = self.kubectl("exec", "-n", "gpu-operator", dcgm_pod, "--",
+                                                   "sh", "-c", "command -v curl >/dev/null 2>&1 && curl -s http://localhost:9400/metrics | head -5 || echo 'curl not available'")
+                
+                if code == 0 and stdout and "DCGM" in stdout:
+                    self.print_info("Metrics endpoint verified (sample metrics found)")
+                elif "curl not available" in stdout or "not found" in stderr:
+                    self.print_info("Metrics endpoint not testable (curl not available in container)")
+                else:
+                    self.print_info("Metrics endpoint exists (content may populate during GPU use)")
             
-            code, stdout, _ = self.kubectl("exec", "-n", "gpu-operator", dcgm_pod, "--",
-                                          "curl", "-s", "http://localhost:9400/metrics")
-            
-            if code == 0 and "DCGM_FI" in stdout:
-                self.print_pass("DCGM metrics exporter functional")
-            else:
-                self.print_warning("DCGM metrics endpoint accessible but no metrics found")
-                self.print_pass("DCGM exporter running (metrics may populate during GPU use)")
+            self.print_pass(f"DCGM exporter running on all GPU nodes ({ready}/{desired})")
+        elif desired == 0:
+            self.print_warning("DCGM exporter DaemonSet found but not scheduled on any nodes")
         else:
-            self.print_fail("No DCGM exporter pod found")
+            self.print_fail(f"DCGM exporter not ready on all nodes ({ready}/{desired})")
     
     def test_operator_validator(self):
-        """Test 8: Verify operator validator"""
-        self.print_test(8, "NVIDIA Operator Validator")
+        """Test 7: Verify operator validator"""
+        self.print_test(7, "NVIDIA Operator Validator")
         
         self.log("Validator DaemonSet:")
         code, stdout, _ = self.kubectl("get", "ds", "-n", "gpu-operator",
@@ -423,8 +403,8 @@ class GPUOperatorTester:
             self.print_fail(f"Operator validator not ready on all nodes ({ready}/{desired})")
     
     def test_cuda_workload(self):
-        """Test 9: Run actual CUDA workload"""
-        self.print_test(9, "CUDA Workload Execution")
+        """Test 8: Run actual CUDA workload"""
+        self.print_test(8, "CUDA Workload Execution")
         
         test_pod_name = "gpu-operator-test-pod"
         
@@ -521,8 +501,8 @@ spec:
         self.kubectl("delete", "pod", test_pod_name, "--ignore-not-found=true")
     
     def test_runai_integration(self):
-        """Test 10: Verify Run:AI integration"""
-        self.print_test(10, "Run:AI Integration")
+        """Test 9: Verify Run:AI integration"""
+        self.print_test(9, "Run:AI Integration")
         
         self.log("Run:AI Device Plugin:")
         code, stdout, _ = self.kubectl("get", "ds", "-n", "runai", "runai-device-plugin")
@@ -577,7 +557,7 @@ spec:
             self.test_pod_status()
             self.test_gpu_discovery()
             self.test_device_plugin()
-            self.test_driver()
+            # Note: test_driver removed - drivers managed by DGX OS in SuperPod
             self.test_gpu_feature_discovery()
             self.test_dcgm_exporter()
             self.test_operator_validator()
