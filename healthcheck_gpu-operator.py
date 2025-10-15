@@ -348,26 +348,17 @@ class GPUOperatorTester:
         
         self.print_info(f"DCGM Exporter pods: {ready}/{desired} ready")
         
-        # Validate pod status
+        # Validate pod status and service
         if ready == desired and desired > 0:
-            # Try to check metrics endpoint (optional - curl may not be available in container)
-            code, stdout, _ = self.kubectl("get", "pods", "-n", "gpu-operator",
-                                           "-l", "app=nvidia-dcgm-exporter",
-                                           "-o", "name")
-            if code == 0 and stdout.strip():
-                dcgm_pod = stdout.strip().split('\n')[0]
-                self.print_info("Checking metrics endpoint availability...")
-                
-                # Try curl (may not be available in minimal container images)
-                code, stdout, stderr = self.kubectl("exec", "-n", "gpu-operator", dcgm_pod, "--",
-                                                   "sh", "-c", "command -v curl >/dev/null 2>&1 && curl -s http://localhost:9400/metrics | head -5 || echo 'curl not available'")
-                
-                if code == 0 and stdout and "DCGM" in stdout:
-                    self.print_info("Metrics endpoint verified (sample metrics found)")
-                elif "curl not available" in stdout or "not found" in stderr:
-                    self.print_info("Metrics endpoint not testable (curl not available in container)")
-                else:
-                    self.print_info("Metrics endpoint exists (content may populate during GPU use)")
+            # Check if service exists for Prometheus to scrape
+            code, stdout, _ = self.kubectl("get", "svc", "-n", "gpu-operator", 
+                                          "nvidia-dcgm-exporter", "-o", "wide")
+            if code == 0:
+                self.log("DCGM Exporter Service:")
+                self.log(stdout)
+                self.print_info("DCGM metrics service available for scraping")
+            else:
+                self.print_warning("DCGM service not found (metrics may not be scrapeable)")
             
             self.print_pass(f"DCGM exporter running on all GPU nodes ({ready}/{desired})")
         elif desired == 0:
