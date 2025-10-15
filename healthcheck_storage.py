@@ -82,12 +82,19 @@ def print_header(title):
 
 def print_test_result(test_num, test_name, passed, message=""):
     """Print a formatted test result."""
-    status = f"{Colors.GREEN}✓ PASS{Colors.END}" if passed else f"{Colors.RED}✗ FAIL{Colors.END}"
-    print(f"{Colors.BOLD}Test {test_num}: {test_name}{Colors.END}")
-    print(f"Status: {status}")
-    if message:
-        print(f"Details: {message}")
-    print()
+    if passed is None:
+        # In-progress status
+        status = f"{Colors.YELLOW}⏳ {message}{Colors.END}" if message else f"{Colors.YELLOW}⏳ RUNNING{Colors.END}"
+        print(f"{Colors.BOLD}Test {test_num}: {test_name}{Colors.END}")
+        print(f"Status: {status}")
+        print()
+    else:
+        status = f"{Colors.GREEN}✓ PASS{Colors.END}" if passed else f"{Colors.RED}✗ FAIL{Colors.END}"
+        print(f"{Colors.BOLD}Test {test_num}: {test_name}{Colors.END}")
+        print(f"Status: {status}")
+        if message:
+            print(f"Details: {message}")
+        print()
 
 
 def print_info(message):
@@ -337,7 +344,7 @@ def test_api_authentication(config):
 
 def get_project_id(config, token, project_name):
     """Get project ID from project name."""
-    url = f"{config['RUNAI_URL']}/api/v1/projects"
+    url = f"{config['RUNAI_URL']}/api/v1/org-unit/projects"
     headers = {
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json'
@@ -347,7 +354,8 @@ def get_project_id(config, token, project_name):
         response = requests.get(url, headers=headers, timeout=30, verify=True)
         
         if response.status_code == 200:
-            projects = response.json()
+            data = response.json()
+            projects = data.get('projects', [])
             for project in projects:
                 if project.get('name') == project_name:
                     return project.get('id')
