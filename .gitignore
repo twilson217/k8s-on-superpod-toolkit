@@ -4,6 +4,12 @@
 # Local documentation that should not be synced
 .nosync/
 
+# Credentials and environment files
+*.env
+runai.env
+.env
+.env.*
+
 # Cursor chat exports
 cursorchats/
 

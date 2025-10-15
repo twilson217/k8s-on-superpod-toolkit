@@ -2,22 +2,26 @@
 """
 Storage Health Check Script - Run:AI Environment
 
-This script validates storage functionality using Run:AI CLI commands to create
+This script validates storage functionality using Run:AI REST API to create
 and delete data sources (PVCs) and verifies proper cleanup of both PVCs and PVs.
 
 PREREQUISITES:
-    Before running this script, you must authenticate with Run:AI:
-        runai login remote-browser
+    1. Create runai.env file with credentials:
+       RUNAI_URL=https://your-runai-url
+       RUNAI_CLIENT_ID=your-client-id
+       RUNAI_CLIENT_SECRET=your-client-secret
+       RUNAI_CLUSTER_ID=your-cluster-id
 
 Tests:
-1. Run:AI CLI Connectivity
-2. Project Validation
-3. Data Source Creation (1GiB PVC)
-4. PVC Status Verification (Bound)
-5. PV Association Verification
-6. Data Source Deletion
-7. PVC Cleanup Verification
-8. PV Cleanup Verification
+1. Environment Configuration Check
+2. Run:AI API Authentication
+3. Project Validation
+4. Data Source Creation (1GiB PVC via API)
+5. PVC Status Verification (Bound)
+6. PV Association Verification
+7. Data Source Deletion (via API)
+8. PVC Cleanup Verification
+9. PV Cleanup Verification
 
 Usage:
     python3 healthcheck_storage.py --project <PROJECT_NAME>
@@ -30,8 +34,11 @@ import subprocess
 import sys
 import argparse
 import time
-import re
+import os
+import json
+import requests
 from datetime import datetime
+from pathlib import Path
 
 
 class Colors:
@@ -90,52 +97,137 @@ def print_warning(message):
     print(f"{Colors.YELLOW}⚠ {message}{Colors.END}")
 
 
-def test_runai_cli():
-    """Test 1: Check Run:AI CLI connectivity."""
-    print_test_result(1, "Run:AI CLI Connectivity", None, "Checking...")
-    
-    cmd = ["runai", "config", "get"]
-    result = run_command(cmd)
-    
-    if not result or result.returncode != 0:
-        print_test_result(1, "Run:AI CLI Connectivity", False,
-                         "Run:AI CLI not available or not authenticated.\n"
-                         "Run: runai login remote-browser")
+def load_env_file(env_file='runai.env'):
+    """Load environment variables from .env file."""
+    env_path = Path(env_file)
+    if not env_path.exists():
         return False
     
-    # Try to parse config to see if we're authenticated
-    if "not logged in" in result.stdout.lower() or "authentication" in result.stderr.lower():
-        print_test_result(1, "Run:AI CLI Connectivity", False,
-                         "Run:AI CLI not authenticated.\n"
-                         "Run: runai login remote-browser")
-        return False
-    
-    print_test_result(1, "Run:AI CLI Connectivity", True,
-                     "Run:AI CLI is available and authenticated")
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, value = line.split('=', 1)
+                os.environ[key.strip()] = value.strip()
     return True
 
 
-def test_project_validation(project_name):
-    """Test 2: Validate project exists."""
-    print_test_result(2, "Project Validation", None, "Checking...")
+def test_environment_config():
+    """Test 1: Check environment configuration."""
+    print_test_result(1, "Environment Configuration Check", None, "Checking...")
     
-    cmd = ["runai", "project", "list"]
-    result = run_command(cmd)
+    # Load runai.env
+    if not load_env_file():
+        print_test_result(1, "Environment Configuration Check", False,
+                         "runai.env file not found in current directory.\n"
+                         "Create runai.env with:\n"
+                         "  RUNAI_URL=https://your-runai-url\n"
+                         "  RUNAI_CLIENT_ID=your-client-id\n"
+                         "  RUNAI_CLIENT_SECRET=your-client-secret\n"
+                         "  RUNAI_CLUSTER_ID=your-cluster-id")
+        return False, {}
     
-    if not result or result.returncode != 0:
-        print_test_result(2, "Project Validation", False,
-                         f"Failed to list projects: {result.stderr if result else 'command failed'}")
-        return False
+    # Check required variables
+    required_vars = ['RUNAI_URL', 'RUNAI_CLIENT_ID', 'RUNAI_CLIENT_SECRET', 'RUNAI_CLUSTER_ID']
+    missing = []
+    config = {}
     
-    # Check if project exists in the output
-    if project_name in result.stdout:
-        print_test_result(2, "Project Validation", True,
-                         f"Project '{project_name}' exists")
-        return True
+    for var in required_vars:
+        value = os.environ.get(var)
+        if not value:
+            missing.append(var)
+        else:
+            config[var] = value
+    
+    if missing:
+        print_test_result(1, "Environment Configuration Check", False,
+                         f"Missing required variables in runai.env: {', '.join(missing)}")
+        return False, {}
+    
+    details = f"Environment loaded successfully:\n"
+    details += f"  • RUNAI_URL: {config['RUNAI_URL']}\n"
+    details += f"  • RUNAI_CLIENT_ID: {config['RUNAI_CLIENT_ID']}\n"
+    details += f"  • RUNAI_CLUSTER_ID: {config['RUNAI_CLUSTER_ID'][:8]}..."
+    
+    print_test_result(1, "Environment Configuration Check", True, details)
+    return True, config
+
+
+def test_api_authentication(config):
+    """Test 2: Authenticate with Run:AI API."""
+    print_test_result(2, "Run:AI API Authentication", None, "Authenticating...")
+    
+    url = f"{config['RUNAI_URL']}/api/v1/token"
+    
+    payload = {
+        "grantType": "client_credentials",
+        "clientId": config['RUNAI_CLIENT_ID'],
+        "clientSecret": config['RUNAI_CLIENT_SECRET']
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=30, verify=True)
+        
+        if response.status_code == 200:
+            data = response.json()
+            token = data.get('accessToken')
+            
+            if token:
+                print_test_result(2, "Run:AI API Authentication", True,
+                                 "Successfully obtained API access token")
+                return True, token
+            else:
+                print_test_result(2, "Run:AI API Authentication", False,
+                                 "No access token in response")
+                return False, None
+        else:
+            print_test_result(2, "Run:AI API Authentication", False,
+                             f"Authentication failed: {response.status_code}\n{response.text}")
+            return False, None
+            
+    except requests.exceptions.RequestException as e:
+        print_test_result(2, "Run:AI API Authentication", False,
+                         f"API request failed: {e}")
+        return False, None
+
+
+def get_project_id(config, token, project_name):
+    """Get project ID from project name."""
+    url = f"{config['RUNAI_URL']}/api/v1/projects"
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30, verify=True)
+        
+        if response.status_code == 200:
+            projects = response.json()
+            for project in projects:
+                if project.get('name') == project_name:
+                    return project.get('id')
+        
+        return None
+        
+    except requests.exceptions.RequestException:
+        return None
+
+
+def test_project_validation(config, token, project_name):
+    """Test 3: Validate project exists."""
+    print_test_result(3, "Project Validation", None, "Checking...")
+    
+    project_id = get_project_id(config, token, project_name)
+    
+    if project_id:
+        print_test_result(3, "Project Validation", True,
+                         f"Project '{project_name}' found with ID: {project_id}")
+        return True, project_id
     else:
-        print_test_result(2, "Project Validation", False,
-                         f"Project '{project_name}' not found in available projects")
-        return False
+        print_test_result(3, "Project Validation", False,
+                         f"Project '{project_name}' not found")
+        return False, None
 
 
 def generate_datasource_name():
@@ -144,33 +236,69 @@ def generate_datasource_name():
     return f"storage-test-{timestamp}"
 
 
-def test_create_datasource(project_name, datasource_name):
-    """Test 3: Create data source (PVC)."""
-    print_test_result(3, "Data Source Creation (1GiB PVC)", None, "Creating...")
+def test_create_datasource(config, token, project_id, datasource_name):
+    """Test 4: Create data source (PVC via API)."""
+    print_test_result(4, "Data Source Creation (1GiB PVC via API)", None, "Creating...")
     
-    cmd = [
-        "runai", "datasource", "create", "pvc",
-        datasource_name,
-        "--project", project_name,
-        "--storage-class", "vast-nfs-ib",
-        "--size", "1Gi",
-        "--access-mode", "ReadWriteMany"
-    ]
+    url = f"{config['RUNAI_URL']}/api/v1/asset/datasource/pvc"
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        "meta": {
+            "name": datasource_name,
+            "scope": "project",
+            "projectId": project_id,
+            "clusterId": config['RUNAI_CLUSTER_ID']
+        },
+        "spec": {
+            "path": "/mnt/storage-test",
+            "existingPvc": False,
+            "claimInfo": {
+                "size": "1Gi",
+                "storageClass": "vast-nfs-ib",
+                "accessModes": {
+                    "readWriteMany": True
+                },
+                "volumeMode": "Filesystem"
+            }
+        }
+    }
     
     print_info(f"Creating data source: {datasource_name}")
-    print_info(f"Command: {' '.join(cmd)}")
+    print_info(f"API: POST {url}")
     
-    result = run_command(cmd, timeout=60)
-    
-    if not result or result.returncode != 0:
-        error_msg = result.stderr if result else "command failed"
-        print_test_result(3, "Data Source Creation (1GiB PVC)", False,
-                         f"Failed to create data source:\n{error_msg}")
-        return False
-    
-    print_test_result(3, "Data Source Creation (1GiB PVC)", True,
-                     f"Data source '{datasource_name}' created successfully")
-    return True
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=60, verify=True)
+        
+        if response.status_code == 202:
+            data = response.json()
+            asset_id = data.get('id')
+            
+            if asset_id:
+                details = f"Data source created successfully\n"
+                details += f"  • Name: {datasource_name}\n"
+                details += f"  • Asset ID: {asset_id}\n"
+                details += f"  • Size: 1Gi\n"
+                details += f"  • Storage Class: vast-nfs-ib"
+                
+                print_test_result(4, "Data Source Creation (1GiB PVC via API)", True, details)
+                return True, asset_id
+            else:
+                print_test_result(4, "Data Source Creation (1GiB PVC via API)", False,
+                                 "No asset ID in response")
+                return False, None
+        else:
+            print_test_result(4, "Data Source Creation (1GiB PVC via API)", False,
+                             f"API returned {response.status_code}: {response.text}")
+            return False, None
+            
+    except requests.exceptions.RequestException as e:
+        print_test_result(4, "Data Source Creation (1GiB PVC via API)", False,
+                         f"API request failed: {e}")
+        return False, None
 
 
 def get_pvc_name(project_name, datasource_name, max_retries=10, retry_delay=3):
@@ -200,11 +328,11 @@ def get_pvc_name(project_name, datasource_name, max_retries=10, retry_delay=3):
 
 
 def test_pvc_status(project_name, pvc_name):
-    """Test 4: Verify PVC is bound."""
-    print_test_result(4, "PVC Status Verification (Bound)", None, "Checking...")
+    """Test 5: Verify PVC is bound."""
+    print_test_result(5, "PVC Status Verification (Bound)", None, "Checking...")
     
     if not pvc_name:
-        print_test_result(4, "PVC Status Verification (Bound)", False,
+        print_test_result(5, "PVC Status Verification (Bound)", False,
                          "PVC name not available")
         return False, None
     
@@ -229,7 +357,7 @@ def test_pvc_status(project_name, pvc_name):
                 phase, volume_name = parts
                 
                 if phase == "Bound":
-                    print_test_result(4, "PVC Status Verification (Bound)", True,
+                    print_test_result(5, "PVC Status Verification (Bound)", True,
                                     f"PVC '{pvc_name}' is Bound to PV '{volume_name}'")
                     return True, volume_name
                 else:
@@ -237,24 +365,24 @@ def test_pvc_status(project_name, pvc_name):
                         print_info(f"PVC status: {phase}, waiting for Bound... (attempt {attempt+1}/{max_retries})")
                         time.sleep(retry_delay)
                     else:
-                        print_test_result(4, "PVC Status Verification (Bound)", False,
+                        print_test_result(5, "PVC Status Verification (Bound)", False,
                                         f"PVC is in '{phase}' state, not Bound")
                         return False, None
         
         if attempt < max_retries - 1:
             time.sleep(retry_delay)
     
-    print_test_result(4, "PVC Status Verification (Bound)", False,
+    print_test_result(5, "PVC Status Verification (Bound)", False,
                      f"Failed to get PVC status after {max_retries} attempts")
     return False, None
 
 
 def test_pv_association(pv_name):
-    """Test 5: Verify PV exists and is bound."""
-    print_test_result(5, "PV Association Verification", None, "Checking...")
+    """Test 6: Verify PV exists and is bound."""
+    print_test_result(6, "PV Association Verification", None, "Checking...")
     
     if not pv_name:
-        print_test_result(5, "PV Association Verification", False,
+        print_test_result(6, "PV Association Verification", False,
                          "PV name not available")
         return False
     
@@ -266,7 +394,7 @@ def test_pv_association(pv_name):
     result = run_command(cmd)
     
     if not result or result.returncode != 0:
-        print_test_result(5, "PV Association Verification", False,
+        print_test_result(6, "PV Association Verification", False,
                          f"PV '{pv_name}' not found")
         return False
     
@@ -282,50 +410,55 @@ def test_pv_association(pv_name):
         details += f"  • Capacity: {capacity}"
         
         if phase == "Bound":
-            print_test_result(5, "PV Association Verification", True, details)
+            print_test_result(6, "PV Association Verification", True, details)
             return True
         else:
-            print_test_result(5, "PV Association Verification", False,
+            print_test_result(6, "PV Association Verification", False,
                              f"{details}\n  • PV is in '{phase}' state, expected 'Bound'")
             return False
     else:
-        print_test_result(5, "PV Association Verification", False,
+        print_test_result(6, "PV Association Verification", False,
                          f"Failed to parse PV information: {output}")
         return False
 
 
-def test_delete_datasource(project_name, datasource_name):
-    """Test 6: Delete data source."""
-    print_test_result(6, "Data Source Deletion", None, "Deleting...")
+def test_delete_datasource(config, token, asset_id, datasource_name):
+    """Test 7: Delete data source via API."""
+    print_test_result(7, "Data Source Deletion (via API)", None, "Deleting...")
     
-    cmd = [
-        "runai", "datasource", "delete", "pvc",
-        datasource_name,
-        "--project", project_name
-    ]
+    url = f"{config['RUNAI_URL']}/api/v1/asset/datasource/pvc/{asset_id}"
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json'
+    }
     
     print_info(f"Deleting data source: {datasource_name}")
-    print_info(f"Command: {' '.join(cmd)}")
+    print_info(f"API: DELETE {url}")
     
-    result = run_command(cmd, timeout=60)
-    
-    if not result or result.returncode != 0:
-        error_msg = result.stderr if result else "command failed"
-        print_test_result(6, "Data Source Deletion", False,
-                         f"Failed to delete data source:\n{error_msg}")
+    try:
+        response = requests.delete(url, headers=headers, timeout=60, verify=True)
+        
+        if response.status_code in [200, 202, 204]:
+            print_test_result(7, "Data Source Deletion (via API)", True,
+                             f"Data source '{datasource_name}' deleted successfully (Asset ID: {asset_id})")
+            return True
+        else:
+            print_test_result(7, "Data Source Deletion (via API)", False,
+                             f"API returned {response.status_code}: {response.text}")
+            return False
+            
+    except requests.exceptions.RequestException as e:
+        print_test_result(7, "Data Source Deletion (via API)", False,
+                         f"API request failed: {e}")
         return False
-    
-    print_test_result(6, "Data Source Deletion", True,
-                     f"Data source '{datasource_name}' deleted successfully")
-    return True
 
 
 def test_pvc_cleanup(project_name, pvc_name, max_retries=10, retry_delay=3):
-    """Test 7: Verify PVC is removed."""
-    print_test_result(7, "PVC Cleanup Verification", None, "Checking...")
+    """Test 8: Verify PVC is removed."""
+    print_test_result(8, "PVC Cleanup Verification", None, "Checking...")
     
     if not pvc_name:
-        print_test_result(7, "PVC Cleanup Verification", False,
+        print_test_result(8, "PVC Cleanup Verification", False,
                          "PVC name not available")
         return False
     
@@ -337,7 +470,7 @@ def test_pvc_cleanup(project_name, pvc_name, max_retries=10, retry_delay=3):
         
         if result and result.returncode != 0:
             # PVC not found - this is what we want
-            print_test_result(7, "PVC Cleanup Verification", True,
+            print_test_result(8, "PVC Cleanup Verification", True,
                              f"PVC '{pvc_name}' successfully removed from cluster")
             return True
         
@@ -345,17 +478,17 @@ def test_pvc_cleanup(project_name, pvc_name, max_retries=10, retry_delay=3):
             print_info(f"PVC still exists, waiting {retry_delay}s... (attempt {attempt+1}/{max_retries})")
             time.sleep(retry_delay)
     
-    print_test_result(7, "PVC Cleanup Verification", False,
+    print_test_result(8, "PVC Cleanup Verification", False,
                      f"PVC '{pvc_name}' still exists after {max_retries * retry_delay}s")
     return False
 
 
 def test_pv_cleanup(pv_name, max_retries=10, retry_delay=3):
-    """Test 8: Verify PV is removed."""
-    print_test_result(8, "PV Cleanup Verification", None, "Checking...")
+    """Test 9: Verify PV is removed."""
+    print_test_result(9, "PV Cleanup Verification", None, "Checking...")
     
     if not pv_name:
-        print_test_result(8, "PV Cleanup Verification", False,
+        print_test_result(9, "PV Cleanup Verification", False,
                          "PV name not available")
         return False
     
@@ -367,7 +500,7 @@ def test_pv_cleanup(pv_name, max_retries=10, retry_delay=3):
         
         if result and result.returncode != 0:
             # PV not found - this is what we want
-            print_test_result(8, "PV Cleanup Verification", True,
+            print_test_result(9, "PV Cleanup Verification", True,
                              f"PV '{pv_name}' successfully removed from cluster")
             return True
         
@@ -382,7 +515,7 @@ def test_pv_cleanup(pv_name, max_retries=10, retry_delay=3):
         if attempt < max_retries - 1:
             time.sleep(retry_delay)
     
-    print_test_result(8, "PV Cleanup Verification", False,
+    print_test_result(9, "PV Cleanup Verification", False,
                      f"PV '{pv_name}' still exists after {max_retries * retry_delay}s")
     return False
 
@@ -394,8 +527,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Prerequisites:
-    Before running this script, authenticate with Run:AI:
-        runai login remote-browser
+    Create runai.env file in the current directory with:
+        RUNAI_URL=https://your-runai-url
+        RUNAI_CLIENT_ID=your-client-id
+        RUNAI_CLIENT_SECRET=your-client-secret
+        RUNAI_CLUSTER_ID=your-cluster-id
 
 Example:
     python3 healthcheck_storage.py --project test
@@ -405,11 +541,9 @@ Example:
     
     args = parser.parse_args()
     
-    print_header("Storage Health Check - Run:AI Environment")
+    print_header("Storage Health Check - Run:AI Environment (API)")
     print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Project: {args.project}")
-    
-    print_warning("PREREQUISITES: Ensure you have run 'runai login remote-browser' before running this script")
     print()
     
     # Generate unique data source name
@@ -418,55 +552,64 @@ Example:
     print()
     
     results = {}
+    config = {}
+    token = None
+    project_id = None
+    asset_id = None
     pvc_name = None
     pv_name = None
     
     # Run tests
-    results['test1'] = test_runai_cli()
+    results['test1'], config = test_environment_config()
     if not results['test1']:
-        print(f"\n{Colors.RED}Cannot proceed without Run:AI CLI access.{Colors.END}\n")
+        print(f"\n{Colors.RED}Cannot proceed without proper environment configuration.{Colors.END}\n")
         return 1
     
-    results['test2'] = test_project_validation(args.project)
+    results['test2'], token = test_api_authentication(config)
     if not results['test2']:
+        print(f"\n{Colors.RED}Cannot proceed without API authentication.{Colors.END}\n")
+        return 1
+    
+    results['test3'], project_id = test_project_validation(config, token, args.project)
+    if not results['test3']:
         print(f"\n{Colors.RED}Cannot proceed with invalid project.{Colors.END}\n")
         return 1
     
-    results['test3'] = test_create_datasource(args.project, datasource_name)
+    results['test4'], asset_id = test_create_datasource(config, token, project_id, datasource_name)
     
-    if results['test3']:
+    if results['test4'] and asset_id:
         # Give it a moment for PVC to be created
         time.sleep(2)
         pvc_name = get_pvc_name(args.project, datasource_name)
         
         if pvc_name:
-            results['test4'], pv_name = test_pvc_status(args.project, pvc_name)
-            results['test5'] = test_pv_association(pv_name)
+            results['test5'], pv_name = test_pvc_status(args.project, pvc_name)
+            results['test6'] = test_pv_association(pv_name)
         else:
-            print_test_result(4, "PVC Status Verification (Bound)", False,
+            print_test_result(5, "PVC Status Verification (Bound)", False,
                              "Could not discover PVC name")
-            results['test4'] = False
             results['test5'] = False
+            results['test6'] = False
         
         # Always try to delete the data source
-        results['test6'] = test_delete_datasource(args.project, datasource_name)
+        results['test7'] = test_delete_datasource(config, token, asset_id, datasource_name)
         
-        if results['test6']:
+        if results['test7']:
             # Give it a moment for cleanup to start
             time.sleep(2)
-            results['test7'] = test_pvc_cleanup(args.project, pvc_name)
-            results['test8'] = test_pv_cleanup(pv_name)
+            results['test8'] = test_pvc_cleanup(args.project, pvc_name)
+            results['test9'] = test_pv_cleanup(pv_name)
         else:
             print_warning(f"Deletion failed. Manual cleanup required:")
-            print_warning(f"  runai datasource delete pvc {datasource_name} --project {args.project}")
-            results['test7'] = False
+            print_warning(f"  DELETE {config['RUNAI_URL']}/api/v1/asset/datasource/pvc/{asset_id}")
             results['test8'] = False
+            results['test9'] = False
     else:
-        results['test4'] = False
         results['test5'] = False
         results['test6'] = False
         results['test7'] = False
         results['test8'] = False
+        results['test9'] = False
     
     # Summary
     print_header("Test Summary")
@@ -486,9 +629,10 @@ Example:
         print(f"{Colors.RED}Please review the failed tests above.{Colors.END}\n")
         
         # Check if we need manual cleanup
-        if not results.get('test6') and datasource_name:
+        if not results.get('test7') and asset_id:
             print_warning("Manual cleanup may be required:")
-            print_warning(f"  runai datasource delete pvc {datasource_name} --project {args.project}")
+            print_warning(f"  Asset ID: {asset_id}")
+            print_warning(f"  Use Run:AI UI or API to delete the datasource")
             print()
         
         return 1
@@ -496,4 +640,3 @@ Example:
 
 if __name__ == "__main__":
     sys.exit(main())
-
