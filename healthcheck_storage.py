@@ -402,7 +402,7 @@ def test_create_datasource(config, token, project_id, datasource_name):
         "meta": {
             "name": datasource_name,
             "scope": "project",
-            "projectId": project_id,
+            "projectId": int(project_id),  # API expects integer, not string
             "clusterId": config['RUNAI_CLUSTER_ID']
         },
         "spec": {
