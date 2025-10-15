@@ -2,6 +2,10 @@
 """
 Script to run multi-node NCCL tests in a RunAI environment.
 
+PREREQUISITES:
+    Before running this script, you must authenticate with Run:AI:
+        runai login remote-browser
+
 Usage:
     python b200_runai_nccl_test.py --project <PROJECT_NAME> --nodes <NUM_NODES> [--debug]
 
