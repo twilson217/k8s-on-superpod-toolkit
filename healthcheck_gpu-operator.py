@@ -491,37 +491,6 @@ spec:
         self.print_info("Cleaning up test pod...")
         self.kubectl("delete", "pod", test_pod_name, "--ignore-not-found=true")
     
-    def test_runai_integration(self):
-        """Test 9: Verify Run:AI integration"""
-        self.print_test(9, "Run:AI Integration")
-        
-        self.log("Run:AI Device Plugin:")
-        code, stdout, _ = self.kubectl("get", "ds", "-n", "runai", "runai-device-plugin")
-        self.log(stdout if code == 0 else "Run:AI device plugin not found")
-        
-        # Count Run:AI pods
-        code, stdout, _ = self.kubectl("get", "pods", "-n", "runai",
-                                       "-l", "app=runai-device-plugin", "--no-headers")
-        runai_pods = len([l for l in stdout.strip().split('\n') if l]) if stdout.strip() else 0
-        self.print_info(f"Run:AI device plugin pods: {runai_pods}")
-        
-        # Check for recent Run:AI workloads
-        self.log("\nRecent Run:AI workloads (last 5):")
-        code, stdout, _ = self.kubectl("get", "pods", "-A", "-l", "runai/queue",
-                                       "--sort-by=.metadata.creationTimestamp")
-        if code == 0 and stdout.strip():
-            lines = stdout.strip().split('\n')
-            for line in lines[-5:]:
-                self.log(line)
-        else:
-            self.log("No Run:AI workloads found")
-        
-        if runai_pods > 0:
-            self.print_pass("Run:AI device plugin is running")
-        else:
-            self.print_warning("Run:AI device plugin not found (may not be an issue if not used)")
-            self.print_pass("Run:AI check completed (no active device plugin pods)")
-    
     # =========================================================================
     # MAIN TEST RUNNER
     # =========================================================================
@@ -553,7 +522,6 @@ spec:
             self.test_dcgm_exporter()
             self.test_operator_validator()
             self.test_cuda_workload()
-            self.test_runai_integration()
         except KeyboardInterrupt:
             self.log("\n\nTests interrupted by user")
             return False
