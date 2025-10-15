@@ -28,8 +28,9 @@ This directory contains detailed upgrade documentation for Kubernetes infrastruc
 See `.logs/todo-list.md` for the complete Kubernetes 1.33 upgrade plan.
 
 ### Next Steps
-1. Other component upgrades (ingress-nginx, snapshot-controller, training-operator, lws)
-2. Kubernetes (v1.31.9 → v1.33.x)
+1. **ingress-nginx** (v1.12.1 → v1.13.3) - Ready for execution
+2. Other component upgrades (snapshot-controller, training-operator, lws)
+3. Kubernetes (v1.31.9 → v1.33.x)
 
 ## Documentation Standards
 
