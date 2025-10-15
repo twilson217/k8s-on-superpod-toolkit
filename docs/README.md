@@ -31,12 +31,28 @@ This directory contains detailed upgrade documentation for Kubernetes infrastruc
 - **Status:** ✅ Complete
 - **Notes:** Fixed ClusterIP/NodePort issue and added nodeAffinity
 
+### Training Operator
+- **File:** `TrainingOperator-1.8-to-1.9-Upgrade.md` *(to be created)*
+- **Date:** October 15, 2025
+- **Upgrade:** v1-855e096 → v1.9.2
+- **Status:** ✅ Complete
+- **Notes:** Run:AI prerequisite, required server-side apply with force-conflicts
+
+### VAST CSI Driver
+- **File:** `VastCSI-2.6.1-to-2.6.3-Upgrade.md`
+- **Date:** October 15, 2025
+- **Upgrades:** 
+  - snapshot-controller: v5.0.1 → v7.0.1 (image v6.3.1)
+  - VAST CSI: v2.6.1 → v2.6.3
+- **Status:** ✅ Complete
+- **Notes:** Included snapshot-controller upgrade per VAST CSI 2.6 requirements
+
 ## Upcoming Upgrades
 
 See `.logs/todo-list.md` for the complete Kubernetes 1.33 upgrade plan.
 
 ### Next Steps
-1. Other component upgrades (snapshot-controller, training-operator, lws)
+1. Other component upgrades (lws downgrade)
 2. Kubernetes (v1.31.9 → v1.33.x)
 
 ## Documentation Standards
