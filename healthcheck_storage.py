@@ -382,10 +382,32 @@ def test_project_validation(config, token, project_name):
         return False, None
 
 
-def generate_datasource_name():
-    """Generate a unique data source name."""
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return f"storage-test-{timestamp}"
+def generate_datasource_name(project_name):
+    """Generate a unique data source name with auto-increment."""
+    # Get existing storagetest* PVCs in the namespace
+    cmd = ["kubectl", "get", "pvc", "-n", f"runai-{project_name}", "-o", "name"]
+    result = run_command(cmd)
+    
+    # Find the highest number
+    max_num = 0
+    if result and result.returncode == 0:
+        pvcs = result.stdout.strip().split('\n')
+        for pvc in pvcs:
+            # Extract PVC name from "persistentvolumeclaim/storagetest1-project-xxx"
+            pvc_name = pvc.replace("persistentvolumeclaim/", "")
+            if pvc_name.startswith("storagetest"):
+                # Extract number from "storagetest1-project-xxx"
+                try:
+                    # Get the part after "storagetest" and before "-"
+                    num_part = pvc_name[11:].split('-')[0]  # Skip "storagetest"
+                    if num_part.isdigit():
+                        max_num = max(max_num, int(num_part))
+                except (ValueError, IndexError):
+                    continue
+    
+    # Use next available number
+    next_num = max_num + 1
+    return f"storagetest{next_num}"
 
 
 def test_create_datasource(config, token, project_id, datasource_name):
@@ -456,7 +478,7 @@ def test_create_datasource(config, token, project_id, datasource_name):
         return False, None
 
 
-def get_pvc_name(project_name, datasource_name, max_retries=10, retry_delay=3):
+def get_pvc_name(project_name, datasource_name, max_retries=20, retry_delay=5):
     """Get the actual PVC name created by Run:AI."""
     print_info(f"Discovering PVC name (format: {datasource_name}-project-<random>)...")
     
@@ -478,6 +500,14 @@ def get_pvc_name(project_name, datasource_name, max_retries=10, retry_delay=3):
         if attempt < max_retries - 1:
             print_info(f"PVC not found yet, waiting {retry_delay}s... (attempt {attempt+1}/{max_retries})")
             time.sleep(retry_delay)
+        else:
+            # On last attempt, show all PVCs for debugging
+            print_warning(f"PVC with pattern '{pattern}' not found after {max_retries * retry_delay}s")
+            if result and result.returncode == 0:
+                print_info(f"Available PVCs in runai-{project_name}:")
+                for pvc in pvcs:
+                    if pvc.strip():
+                        print_info(f"  - {pvc}")
     
     return None
 
@@ -703,8 +733,8 @@ Example:
     print(f"Project: {args.project}")
     print()
     
-    # Generate unique data source name
-    datasource_name = generate_datasource_name()
+    # Generate unique data source name (checks existing PVCs and auto-increments)
+    datasource_name = generate_datasource_name(args.project)
     print_info(f"Test data source name: {datasource_name}")
     print()
     
