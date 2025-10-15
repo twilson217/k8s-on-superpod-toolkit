@@ -428,10 +428,9 @@ def test_create_datasource(config, token, project_id, datasource_name):
         if response.status_code == 202:
             data = response.json()
             
-            # Debug: show what we got back
-            print_info(f"Response data: {json.dumps(data, indent=2)}")
-            
-            asset_id = data.get('id')
+            # Asset ID is nested in meta.id
+            meta = data.get('meta', {})
+            asset_id = meta.get('id')
             
             if asset_id:
                 details = f"Data source created successfully\n"
@@ -444,7 +443,7 @@ def test_create_datasource(config, token, project_id, datasource_name):
                 return True, asset_id
             else:
                 print_test_result(4, "Data Source Creation (1GiB PVC via API)", False,
-                                 f"No asset ID in response. Got keys: {list(data.keys())}")
+                                 f"No asset ID in response. Response: {json.dumps(data, indent=2)}")
                 return False, None
         else:
             print_test_result(4, "Data Source Creation (1GiB PVC via API)", False,
