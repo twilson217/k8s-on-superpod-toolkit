@@ -6,11 +6,14 @@ This script validates storage functionality using Run:AI REST API to create
 and delete data sources (PVCs) and verifies proper cleanup of both PVCs and PVs.
 
 PREREQUISITES:
-    1. Create runai.env file with credentials:
-       RUNAI_URL=https://your-runai-url
-       RUNAI_CLIENT_ID=your-client-id
-       RUNAI_CLIENT_SECRET=your-client-secret
-       RUNAI_CLUSTER_ID=your-cluster-id
+    1. Run the script - it will create a runai.env template if not found
+    2. Edit runai.env and provide:
+       - RUNAI_URL (e.g., https://runai.example.com)
+       - RUNAI_CLIENT_ID (your API client ID)
+       - RUNAI_CLIENT_SECRET (your API client secret)
+    3. Run the script again - it will auto-discover RUNAI_CLUSTER_ID
+
+    Note: runai.env is gitignored for security
 
 Tests:
 1. Environment Configuration Check
@@ -97,43 +100,163 @@ def print_warning(message):
     print(f"{Colors.YELLOW}⚠ {message}{Colors.END}")
 
 
+def create_env_template(env_file='runai.env'):
+    """Create a template runai.env file."""
+    template = """# RunAI API Configuration
+# This file contains sensitive credentials - DO NOT commit to version control
+
+# RunAI Instance Configuration
+RUNAI_URL=
+
+# RunAI API Credentials
+RUNAI_CLIENT_ID=
+RUNAI_CLIENT_SECRET=
+
+# RunAI Cluster ID (auto-populated by script)
+RUNAI_CLUSTER_ID=
+"""
+    with open(env_file, 'w') as f:
+        f.write(template)
+
+
 def load_env_file(env_file='runai.env'):
     """Load environment variables from .env file."""
     env_path = Path(env_file)
     if not env_path.exists():
-        return False
+        return False, {}
     
+    env_vars = {}
     with open(env_path) as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith('#') and '=' in line:
                 key, value = line.split('=', 1)
-                os.environ[key.strip()] = value.strip()
-    return True
+                key = key.strip()
+                value = value.strip()
+                os.environ[key] = value
+                env_vars[key] = value
+    return True, env_vars
+
+
+def update_env_file(env_file='runai.env', updates=None):
+    """Update specific values in the .env file."""
+    if updates is None:
+        return
+    
+    lines = []
+    env_path = Path(env_file)
+    
+    if env_path.exists():
+        with open(env_path) as f:
+            lines = f.readlines()
+    
+    # Update existing keys or keep lines as-is
+    updated_keys = set()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped and not stripped.startswith('#') and '=' in stripped:
+            key = stripped.split('=', 1)[0].strip()
+            if key in updates:
+                lines[i] = f"{key}={updates[key]}\n"
+                updated_keys.add(key)
+    
+    # Write back to file
+    with open(env_path, 'w') as f:
+        f.writelines(lines)
+
+
+def fetch_cluster_id(runai_url, client_id, client_secret):
+    """Fetch cluster ID from Run:AI API."""
+    print_info("Fetching cluster information from Run:AI API...")
+    
+    # First, authenticate
+    token_url = f"{runai_url}/api/v1/token"
+    payload = {
+        "grantType": "client_credentials",
+        "clientId": client_id,
+        "clientSecret": client_secret
+    }
+    
+    try:
+        response = requests.post(token_url, json=payload, timeout=30, verify=True)
+        if response.status_code != 200:
+            print_warning(f"Authentication failed: {response.status_code}")
+            return None
+        
+        token = response.json().get('accessToken')
+        if not token:
+            print_warning("No access token in response")
+            return None
+        
+        # Now get clusters
+        clusters_url = f"{runai_url}/api/v1/clusters"
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        
+        response = requests.get(clusters_url, headers=headers, timeout=30, verify=True)
+        if response.status_code != 200:
+            print_warning(f"Failed to fetch clusters: {response.status_code}")
+            return None
+        
+        clusters = response.json()
+        if not clusters or len(clusters) == 0:
+            print_warning("No clusters found")
+            return None
+        
+        if len(clusters) == 1:
+            cluster = clusters[0]
+            cluster_id = cluster.get('uuid')
+            cluster_name = cluster.get('name')
+            print_info(f"Found cluster: {cluster_name} (ID: {cluster_id})")
+            return cluster_id
+        else:
+            # Multiple clusters - use the first one and inform user
+            cluster = clusters[0]
+            cluster_id = cluster.get('uuid')
+            cluster_name = cluster.get('name')
+            print_info(f"Found {len(clusters)} clusters, using: {cluster_name} (ID: {cluster_id})")
+            return cluster_id
+            
+    except requests.exceptions.RequestException as e:
+        print_warning(f"API request failed: {e}")
+        return None
 
 
 def test_environment_config():
     """Test 1: Check environment configuration."""
     print_test_result(1, "Environment Configuration Check", None, "Checking...")
     
-    # Load runai.env
-    if not load_env_file():
+    # Check if runai.env exists
+    env_path = Path('runai.env')
+    if not env_path.exists():
+        print_info("runai.env not found, creating template...")
+        create_env_template()
         print_test_result(1, "Environment Configuration Check", False,
-                         "runai.env file not found in current directory.\n"
-                         "Create runai.env with:\n"
-                         "  RUNAI_URL=https://your-runai-url\n"
-                         "  RUNAI_CLIENT_ID=your-client-id\n"
-                         "  RUNAI_CLIENT_SECRET=your-client-secret\n"
-                         "  RUNAI_CLUSTER_ID=your-cluster-id")
+                         f"Created {Colors.BOLD}runai.env{Colors.END} template file.\n"
+                         f"Please edit this file and add:\n"
+                         f"  • RUNAI_URL (e.g., https://runai.example.com)\n"
+                         f"  • RUNAI_CLIENT_ID (your API client ID)\n"
+                         f"  • RUNAI_CLIENT_SECRET (your API client secret)\n\n"
+                         f"Then run this script again.\n"
+                         f"Note: RUNAI_CLUSTER_ID will be auto-populated.")
         return False, {}
     
-    # Check required variables
-    required_vars = ['RUNAI_URL', 'RUNAI_CLIENT_ID', 'RUNAI_CLIENT_SECRET', 'RUNAI_CLUSTER_ID']
+    # Load runai.env
+    exists, env_vars = load_env_file()
+    if not exists:
+        print_test_result(1, "Environment Configuration Check", False,
+                         "Failed to load runai.env")
+        return False, {}
+    
+    # Check user-provided required variables
+    user_required_vars = ['RUNAI_URL', 'RUNAI_CLIENT_ID', 'RUNAI_CLIENT_SECRET']
     missing = []
     config = {}
     
-    for var in required_vars:
-        value = os.environ.get(var)
+    for var in user_required_vars:
+        value = env_vars.get(var, '').strip()
         if not value:
             missing.append(var)
         else:
@@ -141,8 +264,29 @@ def test_environment_config():
     
     if missing:
         print_test_result(1, "Environment Configuration Check", False,
-                         f"Missing required variables in runai.env: {', '.join(missing)}")
+                         f"Please edit {Colors.BOLD}runai.env{Colors.END} and provide values for:\n"
+                         f"  • {', '.join(missing)}\n\n"
+                         f"Then run this script again.")
         return False, {}
+    
+    # Check if cluster ID is missing and auto-fetch it
+    cluster_id = env_vars.get('RUNAI_CLUSTER_ID', '').strip()
+    if not cluster_id:
+        print_info("RUNAI_CLUSTER_ID not set, attempting to auto-discover...")
+        cluster_id = fetch_cluster_id(config['RUNAI_URL'], config['RUNAI_CLIENT_ID'], config['RUNAI_CLIENT_SECRET'])
+        
+        if cluster_id:
+            # Save it to the file
+            update_env_file(updates={'RUNAI_CLUSTER_ID': cluster_id})
+            config['RUNAI_CLUSTER_ID'] = cluster_id
+            print_info(f"Saved RUNAI_CLUSTER_ID to runai.env")
+        else:
+            print_test_result(1, "Environment Configuration Check", False,
+                             "Could not auto-discover RUNAI_CLUSTER_ID.\n"
+                             "Please add it manually to runai.env and try again.")
+            return False, {}
+    else:
+        config['RUNAI_CLUSTER_ID'] = cluster_id
     
     details = f"Environment loaded successfully:\n"
     details += f"  • RUNAI_URL: {config['RUNAI_URL']}\n"
@@ -527,11 +671,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Prerequisites:
-    Create runai.env file in the current directory with:
+    On first run, the script will create runai.env template.
+    Edit it and provide:
         RUNAI_URL=https://your-runai-url
         RUNAI_CLIENT_ID=your-client-id
         RUNAI_CLIENT_SECRET=your-client-secret
-        RUNAI_CLUSTER_ID=your-cluster-id
+    
+    RUNAI_CLUSTER_ID will be auto-discovered from the API.
 
 Example:
     python3 healthcheck_storage.py --project test
