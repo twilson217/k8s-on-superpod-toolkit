@@ -20,9 +20,11 @@
 The ingress-nginx deployment has the following BCM-specific settings:
 
 1. **ConfigMap:** `allow-snippet-annotations: "false"` (security)
-2. **Service NodePorts:** BCM variables for HTTP/HTTPS ports
+2. **Service NodePorts:** BCM variables for HTTP/HTTPS ports (main service only, not admission webhook)
 3. **Deployment Replicas:** BCM variable `${replicas}`
-4. **Pod Tolerations:** Run on control-plane nodes
+4. **Pod Scheduling:**
+   - **NodeAffinity:** Prefer nodes with `node-role.kubernetes.io/runai-system` label
+   - **Tolerations:** Tolerate `node-role.kubernetes.io/control-plane:NoSchedule`
 5. **Controller Arguments:**
    - `--publish-service`: LoadBalancer service publication
    - `--default-ssl-certificate`: Default TLS certificate
@@ -185,6 +187,19 @@ kubectl get pods -n ingress-nginx -o wide
 ### Behavioral Changes
 - Added `ttlSecondsAfterFinished: 0` to admission Jobs (immediate cleanup)
 - Enhanced `automountServiceAccountToken` explicit settings
+
+---
+
+## Issues Resolved During Upgrade
+
+### Issue 1: ClusterIP Service with NodePort
+**Problem:** Initial manifest incorrectly added `nodePort` to the admission webhook service (type: ClusterIP).  
+**Symptom:** Namespace stuck in create/delete loop, pods terminating immediately.  
+**Solution:** Updated customization script to only add `nodePort` to the main service (type: NodePort), not the admission webhook service.
+
+### Issue 2: Missing NodeAffinity
+**Problem:** Pods were scheduling on GPU nodes (DGXs) instead of control-plane nodes.  
+**Solution:** Added `nodeAffinity` to prefer nodes with `node-role.kubernetes.io/runai-system` label, ensuring pods run on control-plane/management nodes.
 
 ---
 
