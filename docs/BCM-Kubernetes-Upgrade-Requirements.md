@@ -1,6 +1,7 @@
 # BCM-Specific Requirements for Kubernetes Control Plane Upgrades
 
-**Source:** BCM Containerization Manual, Section 4.22
+**Source:** BCM Containerization Manual, Section 4.22  
+**Environment:** Superpod (Ubuntu-based) - All commands use Ubuntu/apt syntax
 
 ---
 
@@ -23,19 +24,19 @@ cmsh
 [basecm10->kubernetes[default]]% get version
 # Shows: 1.27.13-150500.2.1
 
-# Get the new version info
-[basecm10->kubernetes[default]]% !yum info kubeadm | grep -E '(^Source|^Version|^Release)'
-Version    : 1.28.9
-Release    : 150500.2.1
+# Get the new version info (Ubuntu)
+[basecm10->kubernetes[default]]% !apt-cache policy kubeadm | grep -E '(Installed|Candidate)'
+Installed: 1.28.9-1.1
+Candidate: 1.28.9-1.1
 
 # Set the new version in BCM
-[basecm10->kubernetes[default]]% set version 1.28.9-150500.2.1
+[basecm10->kubernetes[default]]% set version 1.28.9-1.1
 [basecm10->kubernetes*[default*]]% commit
 [basecm10->kubernetes[default]]% quit
 
 # Verify the change
 module load kubernetes/<TAB><TAB>
-# Should show: kubernetes/default/1.28.9-150500.2.1
+# Should show: kubernetes/default/1.28.9-1.1
 ```
 
 **Why This Matters:**
@@ -49,14 +50,14 @@ module load kubernetes/<TAB><TAB>
 
 BCM uses **software images** to provision compute nodes. When upgrading Kubernetes on compute nodes, you must update the software image.
 
-**Process:**
+**Process (Ubuntu):**
 1. Enter the software image via chroot
-2. Update kubernetes.repo to new minor version
-3. Install new kubeadm, kubelet, kubectl packages
+2. Update `/etc/apt/sources.list.d/kubernetes.list` to new minor version
+3. Unhold, update, and re-hold kubeadm, kubelet, kubectl packages
 4. Exit chroot
 5. Update nodes using the software image
 
-**Example for compute nodes:**
+**Example for compute nodes (Ubuntu):**
 ```bash
 # Find the software image for a node
 cmsh
@@ -70,9 +71,14 @@ default-image (category:default)
 
 # Enter chroot and update packages
 cm-chroot-sw-img /cm/images/default-image
-[root@default-image /]# vi /etc/yum.repos.d/kubernetes.repo
-# Change v1.27 to v1.28 in baseurl and gpgkey
-[root@default-image /]# yum install -y kubeadm kubelet kubectl --disableexcludes=kubernetes
+[root@default-image /]# vi /etc/apt/sources.list.d/kubernetes.list
+# Change v1.27 to v1.28 in the deb line
+# Example: deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /
+
+[root@default-image /]# apt-mark unhold kubeadm kubelet kubectl
+[root@default-image /]# apt-get update
+[root@default-image /]# apt-get install -y kubeadm kubelet kubectl
+[root@default-image /]# apt-mark hold kubeadm kubelet kubectl
 [root@default-image /]# exit
 
 # Update the node with new software image
@@ -132,12 +138,13 @@ cm-kubernetes-setup
 
 ### Key Differences from Standard Kubernetes Upgrades:
 
-| Standard Kubernetes | BCM Kubernetes |
-|---------------------|----------------|
+| Standard Kubernetes | BCM Kubernetes (Ubuntu) |
+|---------------------|-------------------------|
 | Direct package updates | Software image updates for compute nodes |
 | Version tracked by kubeadm | Version tracked by BCM + kubeadm |
 | Single upgrade procedure | Different procedures for head node vs. compute nodes |
 | - | Must update BCM metadata after upgrade |
+| `apt-get install` directly | `apt-mark unhold` → update → `apt-mark hold` in chroot |
 
 ---
 
@@ -184,8 +191,25 @@ cm-kubernetes-setup
 ## 📚 References
 
 - **BCM Documentation:** `.nosync/bcm-docs/containerization-manual.txt`, Section 4.22
+  - Section 4.22.8: Notes For Ubuntu (command translations from RHEL)
 - **Upstream Kubernetes Docs:** https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/
 - **CAPI Upgrade Guide:** https://cluster-api.sigs.k8s.io/tasks/upgrading-clusters.html
+
+---
+
+## 🔄 RHEL vs Ubuntu Command Reference
+
+Since the BCM manual primarily uses RHEL examples, here's a quick reference (from BCM Manual Section 4.22.8):
+
+| Task | RHEL/Rocky | Ubuntu (Superpod) |
+|------|------------|-------------------|
+| Check repo config | `grep v /etc/yum.repos.d/kubernetes.repo` | `grep v /etc/apt/sources.list.d/kubernetes.list` |
+| Edit repo config | `vi /etc/yum.repos.d/kubernetes.repo` | `vi /etc/apt/sources.list.d/kubernetes.list` |
+| List available versions | `yum list --showduplicates kubeadm --disableexcludes=kubernetes` | `apt-get update && apt-cache madison kubeadm` |
+| Install packages | `yum install -y kubeadm kubelet kubectl --disableexcludes=kubernetes` | `apt-mark unhold kubeadm kubelet kubectl && apt-get update && apt-get install -y kubeadm kubelet kubectl && apt-mark hold kubeadm kubelet kubectl` |
+| Get version info | `yum info kubeadm` | `apt-cache policy kubeadm` |
+
+**Note:** Ubuntu uses `apt-mark hold` to prevent automatic updates of critical packages like kubeadm/kubelet/kubectl. You must `unhold` before upgrading, then `hold` again after.
 
 ---
 
