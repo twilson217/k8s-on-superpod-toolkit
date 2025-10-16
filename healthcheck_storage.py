@@ -430,9 +430,11 @@ def test_create_datasource(config, token, project_id, datasource_name):
         "spec": {
             "path": "/mnt/storage-test",
             "existingPvc": False,
+            "readOnly": False,
+            "dataSharing": False,
             "claimInfo": {
                 "size": "1Gi",
-                "storageClass": "vast-nfs-ib",
+                "storageClass": config.get('STORAGE_CLASS', 'vast-nfs-ib'),
                 "accessModes": {
                     "readWriteMany": True
                 },
@@ -455,11 +457,12 @@ def test_create_datasource(config, token, project_id, datasource_name):
             asset_id = meta.get('id')
             
             if asset_id:
+                storage_class = config.get('STORAGE_CLASS', 'vast-nfs-ib')
                 details = f"Data source created successfully\n"
                 details += f"  • Name: {datasource_name}\n"
                 details += f"  • Asset ID: {asset_id}\n"
                 details += f"  • Size: 1Gi\n"
-                details += f"  • Storage Class: vast-nfs-ib"
+                details += f"  • Storage Class: {storage_class}"
                 
                 print_test_result(4, "Data Source Creation (1GiB PVC via API)", True, details)
                 return True, asset_id
@@ -705,6 +708,146 @@ def test_pv_cleanup(pv_name, max_retries=10, retry_delay=3):
     return False
 
 
+def load_storage_config():
+    """Load storage configuration from configs/storage.json."""
+    config_path = "configs/storage.json"
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print_warning(f"Could not load config from {config_path}: {e}")
+    return {}
+
+
+def save_storage_config(config):
+    """Save storage configuration to configs/storage.json."""
+    config_path = "configs/storage.json"
+    os.makedirs("configs", exist_ok=True)
+    try:
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=2)
+        print_info(f"Configuration saved to {config_path}")
+    except Exception as e:
+        print_warning(f"Could not save config to {config_path}: {e}")
+
+
+def fetch_projects(runai_url, token):
+    """Fetch all projects from Run:AI API."""
+    url = f"{runai_url}/api/v1/org-unit/projects"
+    headers = {'Authorization': f'Bearer {token}'}
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30, verify=True)
+        if response.status_code == 200:
+            data = response.json()
+            projects = data.get('projects', [])
+            return [(p['name'], p['id']) for p in projects]
+        else:
+            print_warning(f"Failed to fetch projects: {response.status_code}")
+            return []
+    except Exception as e:
+        print_warning(f"Error fetching projects: {e}")
+        return []
+
+
+def fetch_storage_classes(runai_url, token, cluster_id):
+    """Fetch all storage classes from Run:AI API."""
+    url = f"{runai_url}/api/v2/storage-classes?clusterId={cluster_id}"
+    headers = {'Authorization': f'Bearer {token}'}
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=30, verify=True)
+        if response.status_code == 200:
+            data = response.json()
+            items = data.get('items', [])
+            return [item['storageClassName'] for item in items]
+        else:
+            print_warning(f"Failed to fetch storage classes: {response.status_code}")
+            return []
+    except Exception as e:
+        print_warning(f"Error fetching storage classes: {e}")
+        return []
+
+
+def interactive_config(runai_config, token):
+    """Interactively configure project and storage class."""
+    print_header("Interactive Configuration")
+    
+    storage_config = load_storage_config()
+    
+    # Fetch and select project
+    print_info("Fetching projects from Run:AI...")
+    projects = fetch_projects(runai_config['RUNAI_URL'], token)
+    
+    if not projects:
+        print_warning("No projects found via API. Using manual entry.")
+        project_name = input("Enter project name: ").strip()
+        project_id = input("Enter project ID: ").strip()
+    else:
+        print("\nAvailable Projects:")
+        for i, (name, pid) in enumerate(projects, 1):
+            default_marker = " (saved)" if storage_config.get('PROJECT_NAME') == name else ""
+            print(f"  {i}. {name} (ID: {pid}){default_marker}")
+        
+        # Check if saved config exists and is valid
+        if storage_config.get('PROJECT_NAME') in [p[0] for p in projects]:
+            use_saved = input(f"\nUse saved project '{storage_config['PROJECT_NAME']}'? [Y/n]: ").strip().lower()
+            if use_saved in ['', 'y', 'yes']:
+                project_name = storage_config['PROJECT_NAME']
+                project_id = storage_config['PROJECT_ID']
+                print_info(f"Using saved project: {project_name}")
+            else:
+                choice = int(input(f"\nSelect project (1-{len(projects)}): ")) - 1
+                project_name, project_id = projects[choice]
+        else:
+            choice = int(input(f"\nSelect project (1-{len(projects)}): ")) - 1
+            project_name, project_id = projects[choice]
+    
+    # Fetch and select storage class
+    print()
+    print_info("Fetching storage classes from Run:AI...")
+    storage_classes = fetch_storage_classes(runai_config['RUNAI_URL'], token, runai_config['RUNAI_CLUSTER_ID'])
+    
+    if not storage_classes:
+        print_warning("No storage classes found via API. Using manual entry.")
+        storage_class = input("Enter storage class name: ").strip()
+    else:
+        print("\nAvailable Storage Classes:")
+        for i, sc in enumerate(storage_classes, 1):
+            default_marker = " (saved)" if storage_config.get('STORAGE_CLASS') == sc else ""
+            print(f"  {i}. {sc}{default_marker}")
+        
+        # Check if saved config exists and is valid
+        if storage_config.get('STORAGE_CLASS') in storage_classes:
+            use_saved = input(f"\nUse saved storage class '{storage_config['STORAGE_CLASS']}'? [Y/n]: ").strip().lower()
+            if use_saved in ['', 'y', 'yes']:
+                storage_class = storage_config['STORAGE_CLASS']
+                print_info(f"Using saved storage class: {storage_class}")
+            else:
+                choice = int(input(f"\nSelect storage class (1-{len(storage_classes)}): ")) - 1
+                storage_class = storage_classes[choice]
+        else:
+            choice = int(input(f"\nSelect storage class (1-{len(storage_classes)}): ")) - 1
+            storage_class = storage_classes[choice]
+    
+    # Save configuration
+    config = {
+        'PROJECT_NAME': project_name,
+        'PROJECT_ID': project_id,
+        'STORAGE_CLASS': storage_class
+    }
+    save_storage_config(config)
+    
+    print()
+    print_info(f"Configuration:")
+    print_info(f"  Project: {project_name} (ID: {project_id})")
+    print_info(f"  Storage Class: {storage_class}")
+    print()
+    
+    return project_name, project_id, storage_class
+
+
 def main():
     """Main execution function."""
     parser = argparse.ArgumentParser(
@@ -719,45 +862,58 @@ Prerequisites:
         RUNAI_CLIENT_SECRET=your-client-secret
     
     RUNAI_CLUSTER_ID will be auto-discovered from the API.
+    
+    Project and storage class will be selected interactively.
+    Your selections will be saved to configs/storage.json for future runs.
 
 Example:
-    python3 healthcheck_storage.py --project test
+    python3 healthcheck_storage.py
         """
     )
-    parser.add_argument('--project', required=True, help='Run:AI project name')
     
     args = parser.parse_args()
     
     print_header("Storage Health Check - Run:AI Environment (API)")
     print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Project: {args.project}")
-    print()
-    
-    # Generate unique data source name (checks existing PVCs and auto-increments)
-    datasource_name = generate_datasource_name(args.project)
-    print_info(f"Test data source name: {datasource_name}")
     print()
     
     results = {}
     config = {}
     token = None
+    project_name = None
     project_id = None
+    storage_class = None
     asset_id = None
     pvc_name = None
     pv_name = None
     
-    # Run tests
+    # Test 1: Environment configuration
     results['test1'], config = test_environment_config()
     if not results['test1']:
         print(f"\n{Colors.RED}Cannot proceed without proper environment configuration.{Colors.END}\n")
         return 1
     
+    # Test 2: API authentication
     results['test2'], token = test_api_authentication(config)
     if not results['test2']:
         print(f"\n{Colors.RED}Cannot proceed without API authentication.{Colors.END}\n")
         return 1
     
-    results['test3'], project_id = test_project_validation(config, token, args.project)
+    # Interactive configuration for project and storage class
+    project_name, project_id, storage_class = interactive_config(config, token)
+    config['STORAGE_CLASS'] = storage_class
+    
+    # Generate unique data source name (checks existing PVCs and auto-increments)
+    datasource_name = generate_datasource_name(project_name)
+    
+    print_header("Running Storage Health Tests")
+    print(f"Project: {project_name}")
+    print(f"Storage Class: {storage_class}")
+    print_info(f"Test data source name: {datasource_name}")
+    print()
+    
+    # Test 3: Project validation (already done in interactive_config, so just mark as pass)
+    results['test3'], project_id = test_project_validation(config, token, project_name)
     if not results['test3']:
         print(f"\n{Colors.RED}Cannot proceed with invalid project.{Colors.END}\n")
         return 1
@@ -767,10 +923,10 @@ Example:
     if results['test4'] and asset_id:
         # Give it a moment for PVC to be created
         time.sleep(2)
-        pvc_name = get_pvc_name(args.project, datasource_name)
+        pvc_name = get_pvc_name(project_name, datasource_name)
         
         if pvc_name:
-            results['test5'], pv_name = test_pvc_status(args.project, pvc_name)
+            results['test5'], pv_name = test_pvc_status(project_name, pvc_name)
             results['test6'] = test_pv_association(pv_name)
         else:
             print_test_result(5, "PVC Status Verification (Bound)", False,
@@ -784,7 +940,7 @@ Example:
         if results['test7']:
             # Give it a moment for cleanup to start
             time.sleep(2)
-            results['test8'] = test_pvc_cleanup(args.project, pvc_name)
+            results['test8'] = test_pvc_cleanup(project_name, pvc_name)
             results['test9'] = test_pv_cleanup(pv_name)
         else:
             print_warning(f"Deletion failed. Manual cleanup required:")

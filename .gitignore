@@ -10,6 +10,9 @@ runai.env
 .env
 .env.*
 
+# Configuration files with environment-specific settings
+configs/
+
 # Cursor chat exports
 cursorchats/
 
