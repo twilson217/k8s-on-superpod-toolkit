@@ -798,11 +798,27 @@ def interactive_config(runai_config, token):
                 project_id = storage_config['PROJECT_ID']
                 print_info(f"Using saved project: {project_name}")
             else:
-                choice = int(input(f"\nSelect project (1-{len(projects)}): ")) - 1
-                project_name, project_id = projects[choice]
+                while True:
+                    try:
+                        choice = int(input(f"\nSelect project (1-{len(projects)}): ")) - 1
+                        if 0 <= choice < len(projects):
+                            project_name, project_id = projects[choice]
+                            break
+                        else:
+                            print_warning(f"Please enter a number between 1 and {len(projects)}")
+                    except (ValueError, IndexError):
+                        print_warning(f"Invalid input. Please enter a number between 1 and {len(projects)}")
         else:
-            choice = int(input(f"\nSelect project (1-{len(projects)}): ")) - 1
-            project_name, project_id = projects[choice]
+            while True:
+                try:
+                    choice = int(input(f"\nSelect project (1-{len(projects)}): ")) - 1
+                    if 0 <= choice < len(projects):
+                        project_name, project_id = projects[choice]
+                        break
+                    else:
+                        print_warning(f"Please enter a number between 1 and {len(projects)}")
+                except (ValueError, IndexError):
+                    print_warning(f"Invalid input. Please enter a number between 1 and {len(projects)}")
     
     # Fetch and select storage class
     print()
@@ -825,11 +841,27 @@ def interactive_config(runai_config, token):
                 storage_class = storage_config['STORAGE_CLASS']
                 print_info(f"Using saved storage class: {storage_class}")
             else:
-                choice = int(input(f"\nSelect storage class (1-{len(storage_classes)}): ")) - 1
-                storage_class = storage_classes[choice]
+                while True:
+                    try:
+                        choice = int(input(f"\nSelect storage class (1-{len(storage_classes)}): ")) - 1
+                        if 0 <= choice < len(storage_classes):
+                            storage_class = storage_classes[choice]
+                            break
+                        else:
+                            print_warning(f"Please enter a number between 1 and {len(storage_classes)}")
+                    except (ValueError, IndexError):
+                        print_warning(f"Invalid input. Please enter a number between 1 and {len(storage_classes)}")
         else:
-            choice = int(input(f"\nSelect storage class (1-{len(storage_classes)}): ")) - 1
-            storage_class = storage_classes[choice]
+            while True:
+                try:
+                    choice = int(input(f"\nSelect storage class (1-{len(storage_classes)}): ")) - 1
+                    if 0 <= choice < len(storage_classes):
+                        storage_class = storage_classes[choice]
+                        break
+                    else:
+                        print_warning(f"Please enter a number between 1 and {len(storage_classes)}")
+                except (ValueError, IndexError):
+                    print_warning(f"Invalid input. Please enter a number between 1 and {len(storage_classes)}")
     
     # Save configuration
     config = {
