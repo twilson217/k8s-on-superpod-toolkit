@@ -848,6 +848,159 @@ def interactive_config(runai_config, token):
     return project_name, project_id, storage_class
 
 
+def generate_curl_commands(config, project_id, datasource_name, storage_class):
+    """Generate curl commands for manual execution."""
+    timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    output_file = f".logs/storage-healthcheck-curl-{timestamp}.sh"
+    
+    # Ensure .logs directory exists
+    os.makedirs(".logs", exist_ok=True)
+    
+    # Build the payloads
+    auth_payload = {
+        "grantType": "client_credentials",
+        "clientId": "${RUNAI_CLIENT_ID}",
+        "clientSecret": "${RUNAI_CLIENT_SECRET}"
+    }
+    
+    datasource_payload = {
+        "meta": {
+            "name": datasource_name,
+            "scope": "project",
+            "projectId": int(project_id),
+            "clusterId": "${RUNAI_CLUSTER_ID}"
+        },
+        "spec": {
+            "path": "/test",
+            "existingPvc": False,
+            "readOnly": False,
+            "dataSharing": False,
+            "claimInfo": {
+                "size": "1Gi",
+                "storageClass": storage_class,
+                "accessModes": {
+                    "readWriteMany": True
+                },
+                "volumeMode": "Filesystem"
+            }
+        }
+    }
+    
+    # Generate shell script
+    script_content = f"""#!/bin/bash
+#
+# Run:AI Storage Health Check - Manual API Test
+# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+#
+# This script contains curl commands to manually test datasource creation.
+# Useful for debugging permissions issues or sharing with Run:AI support.
+#
+
+set -e  # Exit on error
+
+# Load credentials from runai.env
+export RUNAI_URL="{config['RUNAI_URL']}"
+export RUNAI_CLIENT_ID="{config['RUNAI_CLIENT_ID']}"
+export RUNAI_CLIENT_SECRET="{config['RUNAI_CLIENT_SECRET']}"
+export RUNAI_CLUSTER_ID="{config['RUNAI_CLUSTER_ID']}"
+
+echo "=================================================================="
+echo "Run:AI Storage Health Check - Manual API Test"
+echo "=================================================================="
+echo ""
+echo "Project: {config.get('PROJECT_NAME', 'test')}"
+echo "Storage Class: {storage_class}"
+echo "Datasource Name: {datasource_name}"
+echo ""
+
+# Step 1: Authenticate
+echo "Step 1: Authenticating..."
+TOKEN_RESPONSE=$(curl -s -k -X POST "${{RUNAI_URL}}/api/v1/token" \\
+  -H "Content-Type: application/json" \\
+  -d '{json.dumps(auth_payload, indent=2).replace("'", "\\'")}')
+
+export ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.accessToken')
+
+if [ "$ACCESS_TOKEN" = "null" ] || [ -z "$ACCESS_TOKEN" ]; then
+  echo "❌ Authentication failed!"
+  echo "Response: $TOKEN_RESPONSE"
+  exit 1
+fi
+
+echo "✓ Authenticated successfully"
+echo ""
+
+# Step 2: Create Datasource
+echo "Step 2: Creating datasource '${{DATASOURCE_NAME}}'..."
+echo ""
+
+DATASOURCE_RESPONSE=$(curl -s -k -X POST "${{RUNAI_URL}}/api/v1/asset/datasource/pvc" \\
+  -H "Authorization: Bearer $ACCESS_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{json.dumps(datasource_payload, indent=2).replace("'", "\\'")}')
+
+echo "Response:"
+echo "$DATASOURCE_RESPONSE" | jq '.'
+echo ""
+
+ASSET_ID=$(echo "$DATASOURCE_RESPONSE" | jq -r '.meta.id')
+
+if [ "$ASSET_ID" = "null" ] || [ -z "$ASSET_ID" ]; then
+  echo "❌ Datasource creation failed!"
+  exit 1
+fi
+
+echo "✓ Datasource created with ID: $ASSET_ID"
+echo ""
+
+# Step 3: Wait and check status
+echo "Step 3: Waiting 10 seconds for sync to be attempted..."
+sleep 10
+echo ""
+
+echo "Step 4: Checking datasource status..."
+STATUS_RESPONSE=$(curl -s -k -X GET "${{RUNAI_URL}}/api/v1/asset/datasource/pvc/${{ASSET_ID}}?statusInfo=true" \\
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+
+echo "Status Response:"
+echo "$STATUS_RESPONSE" | jq '.'
+echo ""
+
+STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status.status')
+MESSAGE=$(echo "$STATUS_RESPONSE" | jq -r '.status.message')
+
+echo "Status: $STATUS"
+echo "Message: $MESSAGE"
+echo ""
+
+# Step 5: Check if PVC was created in Kubernetes
+echo "Step 5: Checking for PVC in Kubernetes..."
+echo "Run this command on your cluster:"
+echo "  kubectl get pvc -n runai-{config.get('PROJECT_NAME', 'test')} | grep {datasource_name}"
+echo ""
+
+# Step 6: Cleanup
+echo "Step 6: Cleanup (optional - uncomment to enable)"
+echo "# To delete the datasource:"
+echo "# curl -k -X DELETE \"${{RUNAI_URL}}/api/v1/asset/datasource/pvc/${{ASSET_ID}}\" \\\\"
+echo "#   -H \"Authorization: Bearer $ACCESS_TOKEN\""
+echo ""
+
+echo "=================================================================="
+echo "Test Complete"
+echo "=================================================================="
+"""
+    
+    # Write to file
+    with open(output_file, 'w') as f:
+        f.write(script_content)
+    
+    # Make executable
+    os.chmod(output_file, 0o755)
+    
+    return output_file
+
+
 def main():
     """Main execution function."""
     parser = argparse.ArgumentParser(
@@ -868,8 +1021,11 @@ Prerequisites:
 
 Example:
     python3 healthcheck_storage.py
+    python3 healthcheck_storage.py --dry-run
         """
     )
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Generate curl commands without executing (saves to .logs/)')
     
     args = parser.parse_args()
     
@@ -902,9 +1058,30 @@ Example:
     # Interactive configuration for project and storage class
     project_name, project_id, storage_class = interactive_config(config, token)
     config['STORAGE_CLASS'] = storage_class
+    config['PROJECT_NAME'] = project_name
+    config['PROJECT_ID'] = project_id
     
     # Generate unique data source name (checks existing PVCs and auto-increments)
     datasource_name = generate_datasource_name(project_name)
+    
+    # Handle dry-run mode
+    if args.dry_run:
+        print_header("Dry-Run Mode: Generating curl Commands")
+        print(f"Project: {project_name}")
+        print(f"Storage Class: {storage_class}")
+        print_info(f"Test data source name: {datasource_name}")
+        print()
+        
+        output_file = generate_curl_commands(config, project_id, datasource_name, storage_class)
+        
+        print(f"\n{Colors.GREEN}✓ Generated curl commands: {output_file}{Colors.END}")
+        print()
+        print("To execute the test manually:")
+        print(f"  bash {output_file}")
+        print()
+        print("Or copy/paste individual curl commands from the file.")
+        print()
+        return 0
     
     print_header("Running Storage Health Tests")
     print(f"Project: {project_name}")
