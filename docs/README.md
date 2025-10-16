@@ -47,13 +47,27 @@ This directory contains detailed upgrade documentation for Kubernetes infrastruc
 - **Status:** ✅ Complete
 - **Notes:** Included snapshot-controller upgrade per VAST CSI 2.6 requirements
 
+## BCM-Specific Documentation
+
+### Kubernetes Control Plane Upgrades in BCM Environments
+- **File:** `BCM-Kubernetes-Upgrade-Requirements.md`
+- **Purpose:** Critical BCM-specific requirements for Kubernetes control plane upgrades
+- **Key Topics:**
+  - Updating BCM Kubernetes version metadata (REQUIRED post-upgrade step)
+  - Software image management for compute nodes
+  - Supported version checking
+  - Ingress certificate reconfiguration
+  - BCM vs. standard Kubernetes upgrade differences
+- **Status:** Reference documentation extracted from BCM Containerization Manual
+
 ## Upcoming Upgrades
 
-See `.logs/todo-list.md` for the complete Kubernetes 1.33 upgrade plan.
+See `.nosync/working/todo-list.md` for the complete Kubernetes 1.33 upgrade plan.
 
 ### Next Steps
 1. Other component upgrades (lws downgrade)
-2. Kubernetes (v1.31.9 → v1.33.x)
+2. Kubernetes Control Plane (v1.31.9 → v1.33.x)
+   - **IMPORTANT:** Review `BCM-Kubernetes-Upgrade-Requirements.md` before starting
 
 ## Documentation Standards
 
