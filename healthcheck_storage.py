@@ -428,12 +428,12 @@ def test_create_datasource(config, token, project_id, datasource_name):
             "clusterId": config['RUNAI_CLUSTER_ID']
         },
         "spec": {
-            "path": "/mnt/storage-test",
+            "path": "/test",
             "existingPvc": False,
             "readOnly": False,
             "dataSharing": False,
             "claimInfo": {
-                "size": "1G",
+                "size": "1Gi",
                 "storageClass": config.get('STORAGE_CLASS', 'vast-nfs-ib'),
                 "accessModes": {
                     "readWriteMany": True
@@ -461,7 +461,7 @@ def test_create_datasource(config, token, project_id, datasource_name):
                 details = f"Data source created successfully\n"
                 details += f"  • Name: {datasource_name}\n"
                 details += f"  • Asset ID: {asset_id}\n"
-                details += f"  • Size: 1G\n"
+                details += f"  • Size: 1Gi\n"
                 details += f"  • Storage Class: {storage_class}"
                 
                 print_test_result(4, "Data Source Creation (1GiB PVC via API)", True, details)
