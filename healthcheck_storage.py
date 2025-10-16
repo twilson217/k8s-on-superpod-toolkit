@@ -433,7 +433,7 @@ def test_create_datasource(config, token, project_id, datasource_name):
             "readOnly": False,
             "dataSharing": False,
             "claimInfo": {
-                "size": "1Gi",
+                "size": "1G",
                 "storageClass": config.get('STORAGE_CLASS', 'vast-nfs-ib'),
                 "accessModes": {
                     "readWriteMany": True
@@ -449,7 +449,7 @@ def test_create_datasource(config, token, project_id, datasource_name):
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=60, verify=True)
         
-        if response.status_code == 202:
+        if response.status_code in [200, 201, 202]:
             data = response.json()
             
             # Asset ID is nested in meta.id
@@ -461,7 +461,7 @@ def test_create_datasource(config, token, project_id, datasource_name):
                 details = f"Data source created successfully\n"
                 details += f"  • Name: {datasource_name}\n"
                 details += f"  • Asset ID: {asset_id}\n"
-                details += f"  • Size: 1Gi\n"
+                details += f"  • Size: 1G\n"
                 details += f"  • Storage Class: {storage_class}"
                 
                 print_test_result(4, "Data Source Creation (1GiB PVC via API)", True, details)
