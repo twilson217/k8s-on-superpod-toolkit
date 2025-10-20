@@ -47,6 +47,20 @@ This directory contains detailed upgrade documentation for Kubernetes infrastruc
 - **Status:** ✅ Complete
 - **Notes:** Included snapshot-controller upgrade per VAST CSI 2.6 requirements
 
+### Kubernetes Control Plane
+- **File:** `Kubernetes-1.31-to-1.32-Upgrade.md`
+- **Date:** October 20, 2025
+- **Upgrade:** v1.31.9 → v1.32.9
+- **Status:** ✅ Complete
+- **Critical Issues:**
+  - kube-apiserver manifest fixes required (etcd-servers, feature gates)
+  - Tigera Operator conflict with BCM Calico management
+  - LoadBalancer services disappeared during upgrade
+  - TLS certificate reconfiguration required via `cm-kubernetes-setup`
+- **Notes:** 
+  - **BCM Support Limitation:** Do NOT upgrade beyond 1.32 until BCM releases tooling with 1.33 support
+  - Verified with BCM support that `cm-kubernetes-setup` supports up to v1.32.x only
+
 ## BCM-Specific Documentation
 
 ### Kubernetes Control Plane Upgrades in BCM Environments
@@ -62,12 +76,12 @@ This directory contains detailed upgrade documentation for Kubernetes infrastruc
 
 ## Upcoming Upgrades
 
-See `.nosync/working/todo-list.md` for the complete Kubernetes 1.33 upgrade plan.
-
 ### Next Steps
-1. Other component upgrades (lws downgrade)
-2. Kubernetes Control Plane (v1.31.9 → v1.33.x)
-   - **IMPORTANT:** Review `BCM-Kubernetes-Upgrade-Requirements.md` before starting
+1. Other component upgrades (lws downgrade - deferred)
+2. ~~Kubernetes Control Plane upgrade to v1.33~~ - **NOT SUPPORTED**
+   - **BCM Limitation:** `cm-kubernetes-setup` only supports up to Kubernetes 1.32.x
+   - Confirmed with BCM support - do not attempt 1.33 upgrade
+   - Staying on v1.32.9 until BCM releases updated tooling
 
 ## Documentation Standards
 
