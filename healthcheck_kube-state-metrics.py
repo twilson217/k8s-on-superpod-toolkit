@@ -626,28 +626,15 @@ def test_configuration():
         
         details = "\n".join(details_list)
         
-        # Validation: replicas should be available (critical)
-        # Resources not set is a warning, not a failure
+        # Validation: replicas should be available (critical check)
         replicas_ok = available_replicas >= replicas and replicas > 0
-        resources_set = 'memory' in requests and 'cpu' in requests
-        
-        warnings = []
-        if not resources_set:
-            warnings.append("⚠️  Resource requests/limits not set (recommended but not required)")
         
         if replicas_ok:
-            if warnings:
-                details += "\n\n" + "\n".join(warnings)
             print_test_result(8, "Configuration Validation", True, details)
             return True
         else:
-            issues = []
-            issues.append(f"CRITICAL: Replica issue: {available_replicas}/{replicas}")
-            if warnings:
-                issues.extend(warnings)
-            
             print_test_result(8, "Configuration Validation", False,
-                             f"{details}\n\n" + "\n".join(issues))
+                             f"{details}\n\nCRITICAL: Replica issue - {available_replicas}/{replicas} available")
             return False
         
     except (json.JSONDecodeError, KeyError) as e:
