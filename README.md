@@ -250,7 +250,7 @@ diff pre-upgrade-kube-state-metrics.log post-upgrade-kube-state-metrics.log
    - ClusterIP assigned
 
 3. **Metrics Endpoint Accessibility**
-   - Metrics endpoint responds
+   - Metrics endpoint responds via port-forward
    - Valid metrics output format
    - HTTP connectivity test
 
@@ -262,28 +262,24 @@ diff pre-upgrade-kube-state-metrics.log post-upgrade-kube-state-metrics.log
      - kube_daemonset_status_number_ready
      - kube_namespace_status_phase
 
-5. **Prometheus Integration**
-   - ServiceMonitor configured (if using Prometheus Operator)
-   - Scrape endpoints defined
-   - Scrape interval configured
-   - Note: May fail if not using Prometheus Operator - this is OK
-
-6. **Metric Freshness**
+5. **Metric Freshness**
    - Metrics match actual cluster state
    - Node count accuracy validation
    - Pod count accuracy (within tolerance)
    - Ensures metrics are not stale
 
-7. **Resource Coverage**
+6. **Resource Coverage**
    - Monitoring critical resource types (pods, nodes, deployments)
    - Comprehensive resource type coverage
    - Lists all monitored resources
 
-8. **Configuration Validation**
+7. **Configuration Validation**
    - Image version check
    - Replica status (available/desired)
-   - Resource requests/limits configured
+   - Resource requests/limits displayed for reference
    - Proper deployment configuration
+
+**Note:** ServiceMonitor validation (Prometheus Operator integration) will be included in the kube-prometheus-stack healthcheck instead, since ServiceMonitors are managed by Prometheus Operator.
 
 **Output:**
 - Color-coded test results (✓ PASS, ✗ FAIL)

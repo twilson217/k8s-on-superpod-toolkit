@@ -344,60 +344,12 @@ def test_core_metrics(pod_name):
         return False
 
 
-def test_prometheus_integration():
-    """Test 5: Check Prometheus ServiceMonitor configuration."""
-    print_test_result(5, "Prometheus Integration (ServiceMonitor)", None, "Checking...")
-    
-    # Check if ServiceMonitor exists
-    cmd = "kubectl get servicemonitor -n kube-system -l app.kubernetes.io/name=kube-state-metrics -o json 2>/dev/null"
-    result = run_command(cmd)
-    
-    if not result or result.returncode != 0:
-        # ServiceMonitor might not exist if Prometheus operator is not installed
-        print_test_result(5, "Prometheus Integration (ServiceMonitor)", False,
-                         "ServiceMonitor not found (may not be required if not using Prometheus Operator)")
-        return False
-    
-    try:
-        data = json.loads(result.stdout)
-        servicemonitors = data.get('items', [])
-        
-        if not servicemonitors:
-            print_test_result(5, "Prometheus Integration (ServiceMonitor)", False,
-                             "No ServiceMonitor found for kube-state-metrics")
-            return False
-        
-        details_list = []
-        for sm in servicemonitors:
-            name = sm['metadata']['name']
-            namespace = sm['metadata']['namespace']
-            endpoints = sm['spec'].get('endpoints', [])
-            
-            details_list.append(f"  • {name} (namespace: {namespace})")
-            details_list.append(f"    - Endpoints: {len(endpoints)}")
-            
-            for i, ep in enumerate(endpoints):
-                port = ep.get('port', 'unknown')
-                path = ep.get('path', '/metrics')
-                interval = ep.get('interval', 'default')
-                details_list.append(f"      {i+1}. Port: {port}, Path: {path}, Interval: {interval}")
-        
-        details = f"Found {len(servicemonitors)} ServiceMonitor(s):\n" + "\n".join(details_list)
-        print_test_result(5, "Prometheus Integration (ServiceMonitor)", True, details)
-        return True
-        
-    except json.JSONDecodeError:
-        print_test_result(5, "Prometheus Integration (ServiceMonitor)", False,
-                         "Failed to parse ServiceMonitor output")
-        return False
-
-
 def test_metric_freshness(pod_name):
-    """Test 6: Validate metrics are up-to-date."""
-    print_test_result(6, "Metric Freshness Validation", None, "Checking...")
+    """Test 5: Validate metrics are up-to-date."""
+    print_test_result(5, "Metric Freshness Validation", None, "Checking...")
     
     if not pod_name:
-        print_test_result(6, "Metric Freshness Validation", False,
+        print_test_result(5, "Metric Freshness Validation", False,
                          "No pod name available for testing")
         return False
     
@@ -406,7 +358,7 @@ def test_metric_freshness(pod_name):
     result = run_command(cmd)
     
     if not result or result.returncode != 0:
-        print_test_result(6, "Metric Freshness Validation", False,
+        print_test_result(5, "Metric Freshness Validation", False,
                          "Cannot get node count from cluster")
         return False
     
@@ -467,11 +419,11 @@ def test_metric_freshness(pod_name):
         pod_match = abs(metric_pod_count - actual_pod_count) <= 5  # Pods change frequently
         
         if node_match and pod_match:
-            print_test_result(6, "Metric Freshness Validation", True, 
+            print_test_result(5, "Metric Freshness Validation", True, 
                              details + "\n\n  Metrics are fresh and accurate!")
             return True
         else:
-            print_test_result(6, "Metric Freshness Validation", False,
+            print_test_result(5, "Metric Freshness Validation", False,
                              details + "\n\n  WARNING: Metrics may be stale or inaccurate!")
             return False
             
@@ -482,21 +434,21 @@ def test_metric_freshness(pod_name):
                 port_forward_proc.wait(timeout=2)
             except:
                 pass
-        print_test_result(6, "Metric Freshness Validation", False,
+        print_test_result(5, "Metric Freshness Validation", False,
                          f"Error validating metrics: {e}")
         return False
 
 
 def test_resource_coverage():
-    """Test 7: Verify metrics cover key Kubernetes resources."""
-    print_test_result(7, "Resource Metrics Coverage", None, "Checking...")
+    """Test 6: Verify metrics cover key Kubernetes resources."""
+    print_test_result(6, "Resource Metrics Coverage", None, "Checking...")
     
     # Get kube-state-metrics deployment to check what resources it's monitoring
     cmd = "kubectl get deployment -n kube-system -l app.kubernetes.io/name=kube-state-metrics -o json"
     result = run_command(cmd)
     
     if not result or result.returncode != 0:
-        print_test_result(7, "Resource Metrics Coverage", False,
+        print_test_result(6, "Resource Metrics Coverage", False,
                          "Cannot get kube-state-metrics deployment")
         return False
     
@@ -505,7 +457,7 @@ def test_resource_coverage():
         deployments = data.get('items', [])
         
         if not deployments:
-            print_test_result(7, "Resource Metrics Coverage", False,
+            print_test_result(6, "Resource Metrics Coverage", False,
                              "No deployment found")
             return False
         
@@ -547,29 +499,29 @@ def test_resource_coverage():
         details += "  " + ", ".join(sorted(resources_monitored))
         
         if has_critical:
-            print_test_result(7, "Resource Metrics Coverage", True, details)
+            print_test_result(6, "Resource Metrics Coverage", True, details)
             return True
         else:
             missing = [r for r in critical_resources if r not in resources_monitored]
             details += f"\n\n  WARNING: Missing critical resources: {', '.join(missing)}"
-            print_test_result(7, "Resource Metrics Coverage", False, details)
+            print_test_result(6, "Resource Metrics Coverage", False, details)
             return False
         
     except (json.JSONDecodeError, KeyError) as e:
-        print_test_result(7, "Resource Metrics Coverage", False,
+        print_test_result(6, "Resource Metrics Coverage", False,
                          f"Failed to parse deployment configuration: {e}")
         return False
 
 
 def test_configuration():
-    """Test 8: Validate kube-state-metrics configuration."""
-    print_test_result(8, "Configuration Validation", None, "Checking...")
+    """Test 7: Validate kube-state-metrics configuration."""
+    print_test_result(7, "Configuration Validation", None, "Checking...")
     
     cmd = "kubectl get deployment -n kube-system -l app.kubernetes.io/name=kube-state-metrics -o json"
     result = run_command(cmd)
     
     if not result or result.returncode != 0:
-        print_test_result(8, "Configuration Validation", False,
+        print_test_result(7, "Configuration Validation", False,
                          "Failed to get deployment")
         return False
     
@@ -578,7 +530,7 @@ def test_configuration():
         deployments = data.get('items', [])
         
         if not deployments:
-            print_test_result(8, "Configuration Validation", False,
+            print_test_result(7, "Configuration Validation", False,
                              "No deployment found")
             return False
         
@@ -587,7 +539,7 @@ def test_configuration():
         # Check image version
         containers = deployment['spec']['template']['spec'].get('containers', [])
         if not containers:
-            print_test_result(8, "Configuration Validation", False,
+            print_test_result(7, "Configuration Validation", False,
                              "No containers found in deployment")
             return False
         
@@ -637,15 +589,15 @@ def test_configuration():
         replicas_ok = available_replicas >= replicas and replicas > 0
         
         if replicas_ok:
-            print_test_result(8, "Configuration Validation", True, details)
+            print_test_result(7, "Configuration Validation", True, details)
             return True
         else:
-            print_test_result(8, "Configuration Validation", False,
+            print_test_result(7, "Configuration Validation", False,
                              f"{details}\n\nCRITICAL: Replica issue - {available_replicas}/{replicas} available")
             return False
         
     except (json.JSONDecodeError, KeyError) as e:
-        print_test_result(8, "Configuration Validation", False,
+        print_test_result(7, "Configuration Validation", False,
                          f"Failed to parse configuration: {e}")
         return False
 
@@ -664,10 +616,9 @@ def main():
     results['test2'], service_name = test_service_availability()
     results['test3'] = test_metrics_endpoint(pod_name)
     results['test4'] = test_core_metrics(pod_name)
-    results['test5'] = test_prometheus_integration()
-    results['test6'] = test_metric_freshness(pod_name)
-    results['test7'] = test_resource_coverage()
-    results['test8'] = test_configuration()
+    results['test5'] = test_metric_freshness(pod_name)
+    results['test6'] = test_resource_coverage()
+    results['test7'] = test_configuration()
     
     # Summary
     print_header("Test Summary")
