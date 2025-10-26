@@ -143,6 +143,228 @@ You can proceed with running b200_runai_nccl_test.py
 - Passwordless SSH to GPU nodes (unless using --skip-ssh)
 - Python 3.6+
 
+## Monitoring Stack Health Check Scripts
+
+These scripts validate the health and functionality of monitoring components (metrics-server, kube-state-metrics, kube-prometheus-stack) before and after upgrades. These three components work together to provide comprehensive monitoring for your RunAI-based Kubernetes cluster.
+
+### Monitoring Stack Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Monitoring Stack                              │
+│                                                                      │
+│  ┌──────────────────┐      ┌────────────────┐                      │
+│  │  metrics-server  │      │ kube-state-    │                      │
+│  │                  │      │ metrics        │                      │
+│  │ Real-time CPU/   │      │                │                      │
+│  │ Memory metrics   │      │ K8s object     │                      │
+│  │ from kubelets    │      │ state metrics  │                      │
+│  └────────┬─────────┘      └───────┬────────┘                      │
+│           │                        │                                │
+│           │                        │                                │
+│           └───────┬────────────────┘                                │
+│                   │                                                 │
+│                   ▼                                                 │
+│       ┌────────────────────────┐                                   │
+│       │ kube-prometheus-stack  │                                   │
+│       │                        │                                   │
+│       │ • Prometheus (storage) │                                   │
+│       │ • Grafana (dashboards) │                                   │
+│       │ • Alertmanager (alerts)│                                   │
+│       └────────────────────────┘                                   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Component Roles
+
+- **metrics-server**: Provides real-time resource metrics (CPU/memory) for containers and nodes. Powers `kubectl top` commands and Horizontal Pod Autoscaling (HPA).
+
+- **kube-state-metrics**: Exposes the state of Kubernetes objects (pods, deployments, nodes, jobs, etc.). Generates metrics about object counts, conditions, status, and labels.
+
+- **kube-prometheus-stack**: Full monitoring solution including Prometheus (metrics storage/queries), Grafana (dashboards), and Alertmanager (alerts). Consumes metrics from the other two components.
+
+### Recommended Update Order
+
+Based on dependencies and complexity:
+
+1. **kube-state-metrics** (FIRST) ✅ Health check created
+   - Most isolated, lowest risk
+   - Minimal dependencies
+   - Just exports K8s object states
+   - Current: Chart 5.31.0, App 2.15.0 → Available: Chart 6.3.0, App 2.17.0
+
+2. **metrics-server** (SECOND) - TODO
+   - Core infrastructure but stable
+   - Important for autoscaling
+   - Moderately isolated
+   - Current: Chart 3.12.2, App 0.7.2 → Available: Chart 3.13.0, App 0.8.0
+
+3. **kube-prometheus-stack** (LAST) - TODO
+   - Most complex with many components
+   - Consumes metrics from the other two
+   - Update after data sources are stable
+   - Current: Chart 70.3.0, App v0.81.0 → Available: Chart 78.3.2, App v0.86.1
+
+### `healthcheck_kube-state-metrics.py`
+
+Validates kube-state-metrics, which exposes Kubernetes object state metrics for Prometheus monitoring. This component is critical for monitoring GPU workloads, job scheduling, and cluster health in RunAI environments.
+
+**Basic Usage:**
+```bash
+python3 healthcheck_kube-state-metrics.py
+```
+
+**Upgrade Workflow:**
+
+```bash
+# Step 1: Pre-upgrade health check
+python3 healthcheck_kube-state-metrics.py | tee pre-upgrade-kube-state-metrics.log
+
+# Step 2: Perform upgrade
+helm repo update
+helm upgrade kube-state-metrics prometheus-community/kube-state-metrics \
+  --namespace kube-system \
+  --reuse-values \
+  --version 6.3.0
+
+# Wait for rollout
+kubectl rollout status deployment/kube-state-metrics -n kube-system
+
+# Step 3: Post-upgrade health check
+python3 healthcheck_kube-state-metrics.py | tee post-upgrade-kube-state-metrics.log
+
+# Step 4: Compare results
+diff pre-upgrade-kube-state-metrics.log post-upgrade-kube-state-metrics.log
+```
+
+**Health Check Tests:**
+
+1. **Pod Status**
+   - Verifies pods are running and ready
+   - Checks restart counts
+   - Reports pod health status
+
+2. **Service Availability**
+   - Service is present and configured
+   - Ports are correctly exposed (8080/8081)
+   - ClusterIP assigned
+
+3. **Metrics Endpoint Accessibility**
+   - Metrics endpoint responds
+   - Valid metrics output format
+   - HTTP connectivity test
+
+4. **Core Metrics Availability**
+   - Essential metrics are being exposed:
+     - kube_pod_info, kube_pod_status_phase
+     - kube_node_info, kube_node_status_condition
+     - kube_deployment_status_replicas
+     - kube_daemonset_status_number_ready
+     - kube_namespace_status_phase
+
+5. **Prometheus Integration**
+   - ServiceMonitor configured (if using Prometheus Operator)
+   - Scrape endpoints defined
+   - Scrape interval configured
+   - Note: May fail if not using Prometheus Operator - this is OK
+
+6. **Metric Freshness**
+   - Metrics match actual cluster state
+   - Node count accuracy validation
+   - Pod count accuracy (within tolerance)
+   - Ensures metrics are not stale
+
+7. **Resource Coverage**
+   - Monitoring critical resource types (pods, nodes, deployments)
+   - Comprehensive resource type coverage
+   - Lists all monitored resources
+
+8. **Configuration Validation**
+   - Image version check
+   - Replica status (available/desired)
+   - Resource requests/limits configured
+   - Proper deployment configuration
+
+**Output:**
+- Color-coded test results (✓ PASS, ✗ FAIL)
+- Detailed information for each test
+- Clear summary with pass/fail counts
+- Exit code 0 if all/most tests pass, 1 if failures
+
+**Example Output:**
+```
+================================================================================
+Kube-State-Metrics Health Check
+================================================================================
+
+Timestamp: 2025-10-26 10:30:45
+Namespace: kube-system
+Component: kube-state-metrics
+
+Test 1: Kube-State-Metrics Pod Status
+Status: ✓ PASS
+Details: Found 1 pod(s): 1 running, 1 ready
+  • kube-state-metrics-1234567890-abcde: Running, Ready: True, Restarts: 0
+
+[... additional tests ...]
+
+================================================================================
+Test Summary
+================================================================================
+
+Tests Passed: 8/8
+Tests Failed: 0/8
+
+✓ All tests PASSED!
+Kube-state-metrics is healthy and functioning properly.
+```
+
+**Troubleshooting:**
+
+*Issue: "No pod name available for testing"*
+- **Solution:** Check if kube-state-metrics is deployed:
+  ```bash
+  kubectl get pods -n kube-system -l app.kubernetes.io/name=kube-state-metrics
+  ```
+
+*Issue: "ServiceMonitor not found"*
+- **Solution:** Only required if using Prometheus Operator. If using different Prometheus setup, this failure can be ignored.
+
+*Issue: "Metrics are stale or inaccurate"*
+- **Solution:** Check if kube-state-metrics can access Kubernetes API:
+  ```bash
+  kubectl logs -n kube-system -l app.kubernetes.io/name=kube-state-metrics
+  ```
+
+*Issue: "Cannot access metrics endpoint"*
+- **Solution:** Check pod logs for errors:
+  ```bash
+  kubectl logs -n kube-system -l app.kubernetes.io/name=kube-state-metrics
+  ```
+
+**Integration with RunAI:**
+
+Kube-state-metrics is critical for RunAI monitoring because it provides:
+- Job status and phase information
+- Pod state metrics for workload tracking
+- Resource allocation metrics
+- Namespace and quota information
+
+After upgrading, verify RunAI dashboards still show job statuses, pod states, and resource utilization correctly.
+
+**Prerequisites:**
+- kubectl configured with cluster admin access
+- Python 3.6+
+
+### Best Practices for Monitoring Stack Upgrades
+
+1. **Always run health checks before upgrades** to establish baseline
+2. **Run health checks after upgrades** to verify functionality
+3. **Save logs** for comparison and troubleshooting
+4. **Update in recommended order** to minimize risk
+5. **Test one component at a time** to isolate issues
+6. **Monitor RunAI workloads** after each upgrade to ensure monitoring visibility
+
 ## NCCL Test Script
 
 ### `b200_runai_nccl_test.py`
@@ -385,8 +607,9 @@ kubectl logs -f nccl-test1-worker-1 -n runai-<project>
 
 ```
 .
-├── healthcheck_network-operator.py  # Network Operator health check script
-├── b200_runai_nccl_test.py          # NCCL test runner script
+├── healthcheck_kube-state-metrics.py  # Kube-state-metrics health check script
+├── healthcheck_network-operator.py    # Network Operator health check script
+├── b200_runai_nccl_test.py            # NCCL test runner script
 ├── snapshot.py                      # Environment discovery/snapshot script
 ├── overview.py                      # Environment overview script
 ├── NetworkOperator-24.7.0-to-25.7.0-Upgrade.md  # Network Operator upgrade/troubleshooting guide
