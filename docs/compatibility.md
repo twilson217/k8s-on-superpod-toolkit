@@ -47,7 +47,7 @@
 |-------------|-----------|-------------|------------|--------------|-------------|--------|----------|-------|
 | **kube-prometheus-stack** | prometheus | 70.3.0 | ⚠️ Check latest | ⚠️ Likely yes | ⚠️ Likely yes | ⏸️ Likely OK / Optional upgrade | P2 | Operator v0.81.0 (2024). Says "K8s 1.19+". Recommend verify or upgrade to latest |
 | **metrics-server** | kube-system | 3.12.2 (app: v0.7.2) | v0.8.x | ✅ Yes (1.27+) | ✅ Yes (1.31+) | ⏸️ Stay as-is | Done ✅ | v0.7.x supports K8s 1.27+, compatible with 1.31 & 1.33 |
-| **kube-state-metrics** | kube-system | 5.31.0 (app: v2.14.0) | 5.31.x | ✅ Yes | ✅ Yes | ⏸️ Stay as-is | Done ✅ | K8s SIG project - v2.14.0 supports K8s 1.27-1.34. Latest chart version. Docs: https://github.com/kubernetes/kube-state-metrics |
+| **kube-state-metrics** | kube-system | 5.31.0 (app: v2.15.0) | 6.3.0 (app: v2.17.0) | ⚠️ Works but not optimal | ✅ Yes | 🔄 **Upgrade to v2.17.0** | **P1 - HIGH** | **Current v2.15.0 uses client-go v1.32 (works with K8s 1.31 but not optimal for 1.33). Target v2.17.0 uses client-go v1.33 (proper match).** Upgrade before K8s 1.33 for optimal compatibility. Matrix: v2.15→K8s 1.32, v2.17→K8s 1.33. Healthcheck: `healthcheck_kube-state-metrics.py` https://github.com/kubernetes/kube-state-metrics |
 
 ### Run:AI Platform ✅ ALL COMPATIBLE
 
@@ -221,7 +221,7 @@
 - [x] **lws (LeaderWorkerSet)**: **Run:AI prerequisite** - Current v0.7.0 is newer, **must downgrade to v0.6.2** (Run:AI requirement) ⚠️
 - [x] **training-operator**: **CRITICAL Run:AI prerequisite** - Current version outdated, **must upgrade to v1.9.2** (Run:AI requirement) ⚠️
 - [x] **mpi-operator**: **CRITICAL Run:AI prerequisite** - v0.6.0 is latest and compatible with K8s 1.33 ✅
-- [x] **kube-state-metrics**: v2.14.0 compatible (supports K8s 1.27-1.34) ✅
+- [ ] **kube-state-metrics**: v2.15.0 → v2.17.0 - Should upgrade (v2.15 uses client-go v1.32, v2.17 uses client-go v1.33 for optimal K8s 1.33 support) 🔄
 - [x] **snapshot-controller**: v5.0.1 → v7.0.1 - **Upgraded as part of VAST CSI upgrade** (v7.0.1 required by VAST CSI 2.6) ✅
 - [x] **kubernetes-dashboard**: v7.13.0 (latest) NOT compatible with K8s 1.33 - **Accepted breakage** (not actively used, can fix later)
 
@@ -243,7 +243,7 @@
 - ✅ **Run:AI (60 workloads):** All compatible via 2.22.47 - DONE
 - ✅ **Network Operator:** Already upgraded to v25.7.0 - DONE
 - ✅ **metrics-server:** v0.7.2 compatible (supports K8s 1.27+) - DONE
-- ✅ **kube-state-metrics:** v2.14.0 compatible (supports K8s 1.27-1.34) - DONE
+- 🔄 **kube-state-metrics:** v2.15.0 → v2.17.0 - Should upgrade before K8s 1.33 (optimal client-go match)
 - ✅ **mpi-operator:** v0.6.0 latest and compatible with K8s 1.33 - DONE
 - ✅ **metallb:** v0.15.2 compatible (latest version) - DONE
 - ✅ **vast-csi:** v2.6.1 → v2.6.3 upgraded (v2.6.x supports K8s 1.22-1.34) - DONE (Oct 15)
