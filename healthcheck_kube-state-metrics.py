@@ -36,7 +36,7 @@ class Colors:
     END = '\033[0m'
 
 
-def run_command(cmd, capture_output=True, text=True):
+def run_command(cmd, capture_output=True, text=True, timeout=30):
     """Execute a shell command and return the result."""
     try:
         result = subprocess.run(
@@ -44,7 +44,7 @@ def run_command(cmd, capture_output=True, text=True):
             shell=True,
             capture_output=capture_output,
             text=text,
-            timeout=30
+            timeout=timeout
         )
         return result
     except subprocess.TimeoutExpired:
@@ -64,11 +64,18 @@ def print_header(title):
 
 def print_test_result(test_num, test_name, passed, message=""):
     """Print a formatted test result."""
-    status = f"{Colors.GREEN}✓ PASS{Colors.END}" if passed else f"{Colors.RED}✗ FAIL{Colors.END}"
-    print(f"{Colors.BOLD}Test {test_num}: {test_name}{Colors.END}")
-    print(f"Status: {status}")
-    if message:
-        print(f"Details: {message}")
+    if passed is None:
+        # Just print the test header while checking
+        print(f"{Colors.BOLD}Test {test_num}: {test_name}{Colors.END}")
+        if message:
+            print(f"{message}")
+    else:
+        # Print the final result
+        status = f"{Colors.GREEN}✓ PASS{Colors.END}" if passed else f"{Colors.RED}✗ FAIL{Colors.END}"
+        print(f"{Colors.BOLD}Test {test_num}: {test_name}{Colors.END}")
+        print(f"Status: {status}")
+        if message:
+            print(f"Details: {message}")
     print()
 
 
