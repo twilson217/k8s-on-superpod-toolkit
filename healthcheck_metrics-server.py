@@ -82,8 +82,19 @@ def test_pod_status():
     """Test 1: Check metrics-server pods are running."""
     print_test_result(1, "Metrics-Server Pod Status", None, "Checking...")
     
-    cmd = "kubectl get pods -n kube-system -l k8s-app=metrics-server -o json"
+    # Try app.kubernetes.io/name label first (modern Helm charts)
+    cmd = "kubectl get pods -n kube-system -l app.kubernetes.io/name=metrics-server -o json"
     result = run_command(cmd)
+    
+    # Fallback to older k8s-app label if no pods found
+    if result and result.returncode == 0:
+        try:
+            data = json.loads(result.stdout)
+            if not data.get('items', []):
+                cmd = "kubectl get pods -n kube-system -l k8s-app=metrics-server -o json"
+                result = run_command(cmd)
+        except:
+            pass
     
     if not result or result.returncode != 0:
         print_test_result(1, "Metrics-Server Pod Status", False, 
