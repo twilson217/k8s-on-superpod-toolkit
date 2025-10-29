@@ -22,7 +22,7 @@ Usage:
     python3 healthcheck_kube-prometheus-stack.py [--namespace NAMESPACE]
     
 Arguments:
-    --namespace NAMESPACE    Namespace where kube-prometheus-stack is deployed (default: monitoring)
+    --namespace NAMESPACE    Namespace where kube-prometheus-stack is deployed (default: prometheus)
 """
 
 import subprocess
@@ -90,7 +90,7 @@ def test_prometheus_operator(namespace):
     """Test 1: Check Prometheus Operator pod status."""
     print_test_result(1, "Prometheus Operator Pod Status", None, "Checking...")
     
-    cmd = f"kubectl get pods -n {namespace} -l app.kubernetes.io/name=prometheus-operator -o json"
+    cmd = f"kubectl get pods -n {namespace} -l app.kubernetes.io/name=kube-prometheus-stack-prometheus-operator -o json"
     result = run_command(cmd)
     
     if not result or result.returncode != 0:
@@ -227,10 +227,9 @@ def test_alertmanager_statefulset(namespace):
         statefulsets = data.get('items', [])
         
         if not statefulsets:
-            # Alertmanager is optional, so this is a warning not a failure
-            print_test_result(3, "Alertmanager StatefulSet Status", True,
-                             "No Alertmanager StatefulSets found (optional component)")
-            return True
+            print_test_result(3, "Alertmanager StatefulSet Status", False,
+                             "No Alertmanager StatefulSets found")
+            return False
         
         all_healthy = True
         sts_details = []
@@ -278,10 +277,9 @@ def test_grafana_deployment(namespace):
         deployments = data.get('items', [])
         
         if not deployments:
-            # Grafana is optional, so this is a warning not a failure
-            print_test_result(4, "Grafana Deployment Status", True,
-                             "No Grafana deployments found (optional component)")
-            return True
+            print_test_result(4, "Grafana Deployment Status", False,
+                             "No Grafana deployments found")
+            return False
         
         all_healthy = True
         deploy_details = []
@@ -316,7 +314,7 @@ def test_node_exporter_daemonset(namespace):
     """Test 5: Check Node Exporter DaemonSet status."""
     print_test_result(5, "Node Exporter DaemonSet Status", None, "Checking...")
     
-    cmd = f"kubectl get daemonsets -n {namespace} -l app.kubernetes.io/name=node-exporter -o json"
+    cmd = f"kubectl get daemonsets -n {namespace} -l app.kubernetes.io/name=prometheus-node-exporter -o json"
     result = run_command(cmd)
     
     if not result or result.returncode != 0:
@@ -329,10 +327,9 @@ def test_node_exporter_daemonset(namespace):
         daemonsets = data.get('items', [])
         
         if not daemonsets:
-            # Node Exporter is typically included but check if it's optional
-            print_test_result(5, "Node Exporter DaemonSet Status", True,
-                             "No Node Exporter DaemonSets found (may be disabled)")
-            return True
+            print_test_result(5, "Node Exporter DaemonSet Status", False,
+                             "No Node Exporter DaemonSets found")
+            return False
         
         all_healthy = True
         ds_details = []
@@ -423,10 +420,9 @@ def test_prometheusrules(namespace):
         rules = data.get('items', [])
         
         if not rules:
-            # Having no rules is technically ok, but unusual
-            print_test_result(7, "PrometheusRule Resources", True,
-                             "No PrometheusRules found (may be intentional)")
-            return True
+            print_test_result(7, "PrometheusRule Resources", False,
+                             "No PrometheusRules found")
+            return False
         
         # Count total rule groups and individual rules
         total_groups = 0
@@ -678,8 +674,8 @@ def test_crd_installation():
 def main():
     """Main execution function."""
     parser = argparse.ArgumentParser(description='Kube-Prometheus-Stack Health Check')
-    parser.add_argument('--namespace', '-n', default='monitoring',
-                       help='Namespace where kube-prometheus-stack is deployed (default: monitoring)')
+    parser.add_argument('--namespace', '-n', default='prometheus',
+                       help='Namespace where kube-prometheus-stack is deployed (default: prometheus)')
     args = parser.parse_args()
     
     namespace = args.namespace
