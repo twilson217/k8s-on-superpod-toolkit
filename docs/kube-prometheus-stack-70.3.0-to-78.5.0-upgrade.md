@@ -34,7 +34,7 @@ The kube-prometheus-stack includes:
 
 ### 1. Create Health Check Script
 
-A comprehensive health check script was created at `healthcheck_kube-prometheus-stack.py` to validate:
+A comprehensive health check script was created at `healthchecks/healthcheck_kube-prometheus-stack.py` to validate:
 - Prometheus Operator deployment status
 - Prometheus StatefulSet readiness
 - Alertmanager StatefulSet readiness
@@ -50,7 +50,7 @@ A comprehensive health check script was created at `healthcheck_kube-prometheus-
 
 ```bash
 cd /home/travisw/dev/k8s-on-superpod-toolkit
-python3 healthcheck_kube-prometheus-stack.py
+python3 healthchecks/healthcheck_kube-prometheus-stack.py
 ```
 
 **Expected Result:** All tests should pass. Note that some Prometheus targets for control plane components (kube-controller-manager, kube-scheduler, kube-proxy) are expected to fail on non-control-plane nodes.
@@ -269,7 +269,7 @@ kubectl get pods -n prometheus -o wide
 
 ```bash
 cd /home/travisw/dev/k8s-on-superpod-toolkit
-python3 healthcheck_kube-prometheus-stack.py
+python3 healthchecks/healthcheck_kube-prometheus-stack.py
 ```
 
 **Expected Result:** All tests should pass.
@@ -281,7 +281,7 @@ python3 healthcheck_kube-prometheus-stack.py
 kubectl get pods -n prometheus -o wide
 
 # Run DGX pod placement health check
-python3 healthcheck_dgx-pods.py
+python3 healthchecks/healthcheck_dgx-pods.py
 ```
 
 **Expected Result:** 
@@ -501,7 +501,7 @@ kubectl delete pod alertmanager-kube-prometheus-stack-alertmanager-0 -n promethe
 kubectl delete pod prometheus-kube-prometheus-stack-prometheus-0 -n prometheus
 
 # Run health check
-python3 healthcheck_kube-prometheus-stack.py
+python3 healthchecks/healthcheck_kube-prometheus-stack.py
 ```
 
 ## Summary

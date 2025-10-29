@@ -504,10 +504,10 @@ openssl s_client -connect <RUNAI_HOSTNAME>:443 -servername <RUNAI_HOSTNAME> < /d
 ### 6. Run Health Check Scripts
 ```bash
 # Test ingress-nginx
-python3 healthcheck_ingress-nginx.py
+python3 healthchecks/healthcheck_ingress-nginx.py
 
 # Test storage functionality
-python3 healthcheck_storage.py
+python3 healthchecks/healthcheck_storage.py
 
 # Test Run:AI workload submission (if available)
 python3 b200_runai_nccl_test.py --project test --nodes 1
