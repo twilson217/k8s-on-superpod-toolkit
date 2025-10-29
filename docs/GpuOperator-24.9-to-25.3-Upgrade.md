@@ -20,7 +20,7 @@ Ran comprehensive health check:
 
 ```bash
 cd /home/travisw/dev/k8s-on-superpod-toolkit
-python3 healthcheck_gpu-operator.py before
+python3 healthchecks/healthcheck_gpu-operator.py before
 ```
 
 **Result:** ✅ All 8 tests passed
@@ -61,7 +61,7 @@ All pods rolled out successfully.
 ### 1. Health Check
 
 ```bash
-python3 healthcheck_gpu-operator.py after
+python3 healthchecks/healthcheck_gpu-operator.py after
 ```
 
 **Result:** ✅ All 8 tests passed

@@ -45,20 +45,20 @@ python3 snapshot.py
 
 ## Network Operator Health Check Script
 
-### `healthcheck_network-operator.py`
+### `healthchecks/healthcheck_network-operator.py`
 
 A comprehensive pre-flight check script that validates all NVIDIA Network Operator components required for successful multi-node NCCL tests on B200 systems. **Run this before launching NCCL tests** to ensure your environment is properly configured.
 
 **Usage:**
 ```bash
 # Check specific nodes
-python3 healthcheck_network-operator.py --nodes dgx030,dgx031
+python3 healthchecks/healthcheck_network-operator.py --nodes dgx030,dgx031
 
 # Check all GPU nodes automatically
-python3 healthcheck_network-operator.py
+python3 healthchecks/healthcheck_network-operator.py
 
 # Skip SSH-based node checks (useful if passwordless SSH is not configured)
-python3 healthcheck_network-operator.py --skip-ssh
+python3 healthchecks/healthcheck_network-operator.py --skip-ssh
 ```
 
 **What it checks:**
@@ -205,20 +205,20 @@ Based on dependencies and complexity:
    - Update after data sources are stable
    - Current: Chart 70.3.0, App v0.81.0 → Available: Chart 78.3.2, App v0.86.1
 
-### `healthcheck_kube-state-metrics.py`
+### `healthchecks/healthcheck_kube-state-metrics.py`
 
 Validates kube-state-metrics, which exposes Kubernetes object state metrics for Prometheus monitoring. This component is critical for monitoring GPU workloads, job scheduling, and cluster health in RunAI environments.
 
 **Basic Usage:**
 ```bash
-python3 healthcheck_kube-state-metrics.py
+python3 healthchecks/healthcheck_kube-state-metrics.py
 ```
 
 **Upgrade Workflow:**
 
 ```bash
 # Step 1: Pre-upgrade health check
-python3 healthcheck_kube-state-metrics.py | tee pre-upgrade-kube-state-metrics.log
+python3 healthchecks/healthcheck_kube-state-metrics.py | tee pre-upgrade-kube-state-metrics.log
 
 # Step 2: Perform upgrade
 helm repo update
@@ -231,7 +231,7 @@ helm upgrade kube-state-metrics prometheus-community/kube-state-metrics \
 kubectl rollout status deployment/kube-state-metrics -n kube-system
 
 # Step 3: Post-upgrade health check
-python3 healthcheck_kube-state-metrics.py | tee post-upgrade-kube-state-metrics.log
+python3 healthchecks/healthcheck_kube-state-metrics.py | tee post-upgrade-kube-state-metrics.log
 
 # Step 4: Compare results
 diff pre-upgrade-kube-state-metrics.log post-upgrade-kube-state-metrics.log
@@ -603,8 +603,15 @@ kubectl logs -f nccl-test1-worker-1 -n runai-<project>
 
 ```
 .
-├── healthcheck_kube-state-metrics.py  # Kube-state-metrics health check script
-├── healthcheck_network-operator.py    # Network Operator health check script
+├── healthchecks/                      # Health check scripts directory
+│   ├── healthcheck_dgx-pods.py        # DGX pod placement validation
+│   ├── healthcheck_gpu-operator.py    # GPU Operator health check
+│   ├── healthcheck_ingress-nginx.py   # Ingress NGINX health check
+│   ├── healthcheck_kube-prometheus-stack.py  # Prometheus stack health check
+│   ├── healthcheck_kube-state-metrics.py  # Kube-state-metrics health check
+│   ├── healthcheck_metrics-server.py  # Metrics Server health check
+│   ├── healthcheck_network-operator.py  # Network Operator health check
+│   └── healthcheck_storage.py         # Storage health check
 ├── b200_runai_nccl_test.py            # NCCL test runner script
 ├── snapshot.py                      # Environment discovery/snapshot script
 ├── overview.py                      # Environment overview script

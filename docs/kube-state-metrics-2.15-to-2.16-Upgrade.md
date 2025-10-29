@@ -29,7 +29,7 @@ Upgrade kube-state-metrics to v2.16.0 (client-go v1.32) in preparation for Kuber
 
 ```bash
 cd /root/runai-files/k8s-on-superpod-toolkit
-./healthcheck_kube-state-metrics.py | tee pre-upgrade-ksm-2.16.log
+python3 healthchecks/healthcheck_kube-state-metrics.py | tee pre-upgrade-ksm-2.16.log
 ```
 
 **Expected Result:** All 7 tests should pass (or 6/7 if ServiceMonitor test fails - that's OK).
@@ -188,7 +188,7 @@ Details: Cannot access metrics endpoint via port-forward
 
 ```bash
 cd /root/runai-files/k8s-on-superpod-toolkit
-./healthcheck_kube-state-metrics.py | tee post-upgrade-ksm-2.16.log
+python3 healthchecks/healthcheck_kube-state-metrics.py | tee post-upgrade-ksm-2.16.log
 ```
 
 **Expected Result:** All 7 tests should pass:
@@ -339,7 +339,7 @@ helm rollback kube-state-metrics -n kube-system
 kubectl rollout status deployment/kube-state-metrics -n kube-system
 
 # Run health check
-./healthcheck_kube-state-metrics.py
+python3 healthchecks/healthcheck_kube-state-metrics.py
 ```
 
 ---
@@ -366,7 +366,7 @@ kubectl rollout status deployment/kube-state-metrics -n kube-system
 
 3. **Verify after K8s 1.33:**
    ```bash
-   ./healthcheck_kube-state-metrics.py
+   python3 healthchecks/healthcheck_kube-state-metrics.py
    ```
 
 ---
