@@ -155,7 +155,7 @@ def test_prometheus_statefulset(namespace):
     print_test_result(2, "Prometheus StatefulSet Status", None, "Checking...")
     
     # Find Prometheus StatefulSets
-    cmd = f"kubectl get statefulsets -n {namespace} -l app.kubernetes.io/name=prometheus -o json"
+    cmd = f"kubectl get statefulsets -n {namespace} -l app=kube-prometheus-stack-prometheus -o json"
     result = run_command(cmd)
     
     if not result or result.returncode != 0:
@@ -182,7 +182,7 @@ def test_prometheus_statefulset(namespace):
             ready_replicas = sts['status'].get('readyReplicas', 0)
             
             # Get pod names
-            pod_cmd = f"kubectl get pods -n {namespace} -l app.kubernetes.io/name=prometheus,statefulset.kubernetes.io/pod-name -o json"
+            pod_cmd = f"kubectl get pods -n {namespace} -l app.kubernetes.io/name=prometheus -o json"
             pod_result = run_command(pod_cmd)
             if pod_result and pod_result.returncode == 0:
                 pod_data = json.loads(pod_result.stdout)
@@ -214,7 +214,7 @@ def test_alertmanager_statefulset(namespace):
     """Test 3: Check Alertmanager StatefulSet status."""
     print_test_result(3, "Alertmanager StatefulSet Status", None, "Checking...")
     
-    cmd = f"kubectl get statefulsets -n {namespace} -l app.kubernetes.io/name=alertmanager -o json"
+    cmd = f"kubectl get statefulsets -n {namespace} -l app=kube-prometheus-stack-alertmanager -o json"
     result = run_command(cmd)
     
     if not result or result.returncode != 0:
