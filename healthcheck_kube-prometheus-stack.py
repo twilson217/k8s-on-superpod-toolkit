@@ -468,6 +468,33 @@ def test_prometheus_targets(namespace, prometheus_pods):
                          "No Prometheus pods available for testing")
         return False
     
+    # Get node counts to calculate expected failures
+    node_cmd = "kubectl get nodes -o json"
+    node_result = run_command(node_cmd)
+    
+    control_plane_nodes = 0
+    total_nodes = 0
+    
+    if node_result and node_result.returncode == 0:
+        try:
+            node_data = json.loads(node_result.stdout)
+            nodes = node_data.get('items', [])
+            total_nodes = len(nodes)
+            
+            for node in nodes:
+                labels = node['metadata'].get('labels', {})
+                # Check for control-plane or master role
+                if 'node-role.kubernetes.io/control-plane' in labels or 'node-role.kubernetes.io/master' in labels:
+                    control_plane_nodes += 1
+        except:
+            pass
+    
+    # Calculate expected failures:
+    # - kube-controller-manager: 1 per control-plane node
+    # - kube-scheduler: 1 per control-plane node
+    # - kube-proxy: 1 per node (all nodes)
+    expected_failures = (control_plane_nodes * 2) + total_nodes
+    
     # Use the first Prometheus pod
     prometheus_pod = prometheus_pods[0]
     
@@ -502,6 +529,13 @@ def test_prometheus_targets(namespace, prometheus_pods):
                     up_targets = sum(1 for t in targets if t.get('health') == 'up')
                     down_targets = total_targets - up_targets
                     
+                    # Count control plane failures
+                    control_plane_jobs = ['kube-controller-manager', 'kube-scheduler', 'kube-proxy']
+                    control_plane_down = sum(1 for t in targets 
+                                            if t.get('health') != 'up' 
+                                            and t.get('labels', {}).get('job') in control_plane_jobs)
+                    unexpected_down = down_targets - control_plane_down
+                    
                     # Sample some targets
                     sample_targets = []
                     for target in targets[:5]:
@@ -513,19 +547,32 @@ def test_prometheus_targets(namespace, prometheus_pods):
                     if total_targets > 5:
                         sample_targets.append(f"    ... and {total_targets - 5} more targets")
                     
+                    # Calculate health excluding expected failures
+                    testable_targets = total_targets - expected_failures
+                    testable_up = up_targets
+                    health_percent = (testable_up / testable_targets * 100) if testable_targets > 0 else 0
+                    
                     details = f"Target Status: {up_targets}/{total_targets} up\n"
                     details += f"  • Up: {up_targets}\n"
                     details += f"  • Down: {down_targets}\n"
-                    details += f"Sample Targets:\n" + "\n".join(sample_targets)
                     
-                    # Pass if at least 90% of targets are up
-                    health_percent = (up_targets / total_targets * 100) if total_targets > 0 else 0
-                    if health_percent >= 90:
-                        print_test_result(8, "Prometheus Targets Health", True, details)
+                    if expected_failures > 0:
+                        details += f"\nExpected Failures (control plane components):\n"
+                        details += f"  • Expected: {expected_failures} ({control_plane_nodes} control-plane nodes × 2 + {total_nodes} nodes × 1 for kube-proxy)\n"
+                        details += f"  • Actual control plane failures: {control_plane_down}\n"
+                        details += f"  • Unexpected failures: {unexpected_down}\n"
+                        details += f"\nAdjusted Health: {health_percent:.1f}% of testable targets up ({testable_up}/{testable_targets})"
+                    
+                    details += f"\n\nSample Targets:\n" + "\n".join(sample_targets)
+                    
+                    # Pass if no unexpected failures
+                    if unexpected_down == 0:
+                        print_test_result(8, "Prometheus Targets Health", True, 
+                                       f"{details}\n\n✓ All expected targets are healthy (control plane failures are normal)")
                         return True
                     else:
                         print_test_result(8, "Prometheus Targets Health", False,
-                                       f"{details}\n\nWARNING: {health_percent:.1f}% targets healthy (threshold: 90%)")
+                                       f"{details}\n\n✗ {unexpected_down} unexpected target(s) down!")
                         return False
                 else:
                     print_test_result(8, "Prometheus Targets Health", False,
