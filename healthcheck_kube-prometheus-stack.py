@@ -529,12 +529,27 @@ def test_prometheus_targets(namespace, prometheus_pods):
                     up_targets = sum(1 for t in targets if t.get('health') == 'up')
                     down_targets = total_targets - up_targets
                     
-                    # Count control plane failures
+                    # Count control plane failures and identify unexpected failures
                     control_plane_jobs = ['kube-controller-manager', 'kube-scheduler', 'kube-proxy']
-                    control_plane_down = sum(1 for t in targets 
-                                            if t.get('health') != 'up' 
-                                            and t.get('labels', {}).get('job') in control_plane_jobs)
-                    unexpected_down = down_targets - control_plane_down
+                    control_plane_down = 0
+                    unexpected_down_targets = []
+                    
+                    for t in targets:
+                        if t.get('health') != 'up':
+                            job = t.get('labels', {}).get('job', 'unknown')
+                            if job in control_plane_jobs:
+                                control_plane_down += 1
+                            else:
+                                # This is an unexpected failure - capture details
+                                instance = t.get('labels', {}).get('instance', 'unknown')
+                                last_error = t.get('lastError', 'No error message available')
+                                unexpected_down_targets.append({
+                                    'job': job,
+                                    'instance': instance,
+                                    'error': last_error
+                                })
+                    
+                    unexpected_down = len(unexpected_down_targets)
                     
                     # Sample some targets
                     sample_targets = []
@@ -571,8 +586,18 @@ def test_prometheus_targets(namespace, prometheus_pods):
                                        f"{details}\n\n✓ All expected targets are healthy (control plane failures are normal)")
                         return True
                     else:
+                        # Add details about unexpected failures
+                        unexpected_details = f"\n\n✗ {unexpected_down} unexpected target(s) down:\n"
+                        for target in unexpected_down_targets:
+                            unexpected_details += f"  • Job: {target['job']}, Instance: {target['instance']}\n"
+                            # Truncate very long error messages
+                            error_msg = target['error']
+                            if len(error_msg) > 150:
+                                error_msg = error_msg[:150] + "..."
+                            unexpected_details += f"    Error: {error_msg}\n"
+                        
                         print_test_result(8, "Prometheus Targets Health", False,
-                                       f"{details}\n\n✗ {unexpected_down} unexpected target(s) down!")
+                                       f"{details}{unexpected_details}")
                         return False
                 else:
                     print_test_result(8, "Prometheus Targets Health", False,
