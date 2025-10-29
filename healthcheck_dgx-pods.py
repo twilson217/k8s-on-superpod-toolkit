@@ -184,17 +184,25 @@ def analyze_pod_placement(dgx_pods):
         dgx_pods: List of pod objects running on DGX nodes
         
     Returns:
-        tuple: (total_dgx_pods, daemonset_count, user_workload_count, violations)
+        tuple: (total_dgx_pods, daemonset_count, user_workload_count, completed_count, violations)
     """
     total_dgx_pods = len(dgx_pods)
     daemonset_count = 0
     user_workload_count = 0
+    completed_count = 0
     violations = []
     
     for pod in dgx_pods:
         namespace = pod['metadata']['namespace']
         pod_name = pod['metadata']['name']
+        pod_phase = pod['status'].get('phase', 'Unknown')
         owner_kind = get_pod_owner_kind(pod)
+        
+        # Skip completed/terminated pods (Succeeded or Failed)
+        # These are one-time jobs/validators that have finished
+        if pod_phase in ['Succeeded', 'Failed']:
+            completed_count += 1
+            continue
         
         # Skip DaemonSets (allowed on all nodes)
         if owner_kind == 'DaemonSet':
@@ -215,7 +223,7 @@ def analyze_pod_placement(dgx_pods):
             'node': pod['spec'].get('nodeName', 'unknown')
         })
     
-    return total_dgx_pods, daemonset_count, user_workload_count, violations
+    return total_dgx_pods, daemonset_count, user_workload_count, completed_count, violations
 
 
 def print_violations_table(violations):
@@ -280,10 +288,11 @@ def main():
     
     # Step 3: Analyze pod placement
     print(f"\n{Colors.BOLD}Step 3: Analyzing Pod Placement{Colors.END}")
-    total_dgx_pods, daemonset_count, user_workload_count, violations = analyze_pod_placement(dgx_pods)
+    total_dgx_pods, daemonset_count, user_workload_count, completed_count, violations = analyze_pod_placement(dgx_pods)
     
     print(f"  • DaemonSet pods (allowed): {daemonset_count}")
     print(f"  • User workload pods from runai-<project> (allowed): {user_workload_count}")
+    print(f"  • Completed/terminated pods (ignored): {completed_count}")
     print(f"  • System/infrastructure pods (violations): {len(violations)}")
     
     # Step 4: Report results
@@ -294,6 +303,8 @@ def main():
         print(f"{Colors.GREEN}DGX worker nodes are only running:{Colors.END}")
         print(f"{Colors.GREEN}  • DaemonSet pods ({daemonset_count} pods){Colors.END}")
         print(f"{Colors.GREEN}  • User workload pods from runai-<project> namespaces ({user_workload_count} pods){Colors.END}")
+        if completed_count > 0:
+            print(f"{Colors.GREEN}  • Completed/terminated pods ({completed_count} pods - ignored as they're not actively running){Colors.END}")
         print(f"\n{Colors.GREEN}No system or infrastructure pods found on DGX nodes.{Colors.END}\n")
         return 0
     else:
