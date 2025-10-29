@@ -45,7 +45,7 @@
 
 | Application | Namespace | Current Ver | Latest Ver | Current→1.33 | Latest→1.31 | Action | Priority | Notes |
 |-------------|-----------|-------------|------------|--------------|-------------|--------|----------|-------|
-| **kube-prometheus-stack** | prometheus | 70.3.0 | ⚠️ Check latest | ⚠️ Likely yes | ⚠️ Likely yes | ⏸️ Likely OK / Optional upgrade | P2 | Operator v0.81.0 (2024). Says "K8s 1.19+". Recommend verify or upgrade to latest |
+| **kube-prometheus-stack** | prometheus | 70.3.0 (app: v0.81.0) | 78.5.0 (app: v0.86.1) | ✅ Yes (1.19+) | ✅ Yes (1.19+) | ⏸️ Optional upgrade | P2 | **Current: Operator v0.81.0 (Dec 2024) supports K8s 1.19+ (compatible with 1.31, 1.32, 1.33). Target: Operator v0.86.1 (Oct 2025) supports K8s 1.19+ with latest features and improved CRDs.** Both versions fully compatible, upgrade optional for latest features. **Chart 78.5.0 includes Prometheus v3.2.1, Alertmanager v0.28.1, Grafana 11.5.2.** Healthcheck: `healthcheck_kube-prometheus-stack.py`. Docs: https://github.com/prometheus-operator/kube-prometheus & https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack |
 | **metrics-server** | kube-system | 3.12.2 (app: v0.7.2) | 3.13.0 (app: v0.8.0) | ✅ Yes (1.27+) | ✅ Yes (1.29+) | ⏸️ Optional upgrade | P3 | **Current v0.7.2 supports K8s 1.27+ (compatible with 1.31, 1.32, 1.33). Target v0.8.0 adds enhanced features and supports K8s 1.29+.** Both versions fully compatible. Upgrade optional for new features. Healthcheck: `healthcheck_metrics-server.py` Docs: https://github.com/kubernetes-sigs/metrics-server |
 | **kube-state-metrics** | kube-system | 5.31.0 (app: v2.15.0) | 6.3.0 (app: v2.17.0) | ⚠️ Works but not optimal | ✅ Yes | 🔄 **Upgrade to v2.17.0** | **P1 - HIGH** | **Current v2.15.0 uses client-go v1.32 (works with K8s 1.31 but not optimal for 1.33). Target v2.17.0 uses client-go v1.33 (proper match).** Upgrade before K8s 1.33 for optimal compatibility. Matrix: v2.15→K8s 1.32, v2.17→K8s 1.33. Healthcheck: `healthcheck_kube-state-metrics.py` https://github.com/kubernetes/kube-state-metrics |
 
@@ -212,7 +212,7 @@
 - [ ] Test in staging environment if available
 
 ### Application-Specific Checks:
-- [~] **kube-prometheus-stack**: v70.3.0 with operator v0.81.0 - likely compatible (says "K8s 1.19+"), recommend verify or check for newer chart version
+- [x] **kube-prometheus-stack**: v70.3.0 (app v0.81.0) → v78.5.0 (app v0.86.1) - Optional upgrade (both versions support K8s 1.19+ and are compatible with 1.31, 1.32, 1.33) ⏸️
 - [x] **metrics-server**: v0.7.2 → v0.8.0 - Optional upgrade (v0.7.2 supports K8s 1.27+, v0.8.0 adds features; both compatible with 1.31, 1.32, 1.33) ⏸️
 - [x] **ingress-nginx**: v1.12.1 → v1.13.3 required (current only supports up to 1.32)
 - [x] **metallb**: v0.15.2 - latest version, compatible with both 1.31 & 1.33 ✅
@@ -242,6 +242,7 @@
 **Total Workloads Identified:** 77 applications/workloads
 - ✅ **Run:AI (60 workloads):** All compatible via 2.22.47 - DONE
 - ✅ **Network Operator:** Already upgraded to v25.7.0 - DONE
+- ⏸️ **kube-prometheus-stack:** v70.3.0 (app v0.81.0) → v78.5.0 (app v0.86.1) - Optional upgrade (both versions compatible with 1.31, 1.32, 1.33)
 - ⏸️ **metrics-server:** v0.7.2 → v0.8.0 - Optional upgrade (both versions compatible with 1.31, 1.32, 1.33)
 - 🔄 **kube-state-metrics:** v2.15.0 → v2.17.0 - Should upgrade before K8s 1.33 (optimal client-go match)
 - ✅ **mpi-operator:** v0.6.0 latest and compatible with K8s 1.33 - DONE
@@ -345,6 +346,7 @@
 ### Verified Compatibility ✅
 - **Run:AI 2.22.47:** Confirmed compatible with K8s 1.31 & 1.33 (60 workloads)
 - **Network Operator v25.7.0:** Supports K8s 1.33 (already upgraded)
+- **kube-prometheus-stack v70.3.0 → v78.5.0:** v70.3.0 (operator v0.81.0) and v78.5.0 (operator v0.86.1) both support K8s 1.19+ (fully compatible with 1.31, 1.32, & 1.33) - Optional upgrade for latest features
 - **metrics-server v0.7.2 → v0.8.0:** v0.7.2 supports K8s 1.27+, v0.8.0 supports K8s 1.29+ (both compatible with 1.31, 1.32, & 1.33) - Optional upgrade for enhanced features
 - **metallb v0.15.2:** Latest version, compatible with K8s 1.31 & 1.33
 - **vast-csi v2.6.1:** v2.6.x supports K8s 1.22-1.34 (compatible with 1.31 & 1.33)
