@@ -554,6 +554,199 @@ def save_data_to_file(data: Dict, filename: str):
     print(f"Data saved to: {filename}")
 
 
+def generate_simplified_summary(pre_data: Dict, post_data: Dict, output_file: str):
+    """
+    Generate a simplified summary report for easy copy-paste to emails.
+    Consolidates multiple components into single application rows.
+    """
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    
+    # Helper function to consolidate apps by namespace/helm release
+    def consolidate_apps(data):
+        """Consolidate workloads into main applications (Helm releases or namespace groups)"""
+        helm_releases = data['helm_releases']
+        workloads = data['workloads']
+        
+        consolidated = {}
+        
+        # Add all Helm releases as primary applications
+        for helm_key, helm_data in helm_releases.items():
+            key = f"{helm_data['namespace']}/{helm_data['name']}"
+            consolidated[key] = {
+                'namespace': helm_data['namespace'],
+                'name': helm_data['name'],
+                'source': 'Helm',
+                'chart_version': helm_data['chart_version'],
+                'app_version': helm_data['app_version'],
+                'is_helm': True
+            }
+        
+        # Add standalone workloads (not managed by Helm)
+        for workload_key, workload_data in workloads.items():
+            helm_key = is_helm_managed(workload_key, workload_data, helm_releases)
+            if not helm_key:
+                namespace = workload_data['namespace']
+                name = workload_data['name']
+                
+                # Check if this is part of a known multi-component system
+                # Group by namespace for certain known systems
+                parent_key = None
+                
+                # Don't create duplicate entries for workloads that are clearly sub-components
+                # These namespaces typically have ONE main component, skip individual workloads
+                skip_namespaces = {'runai', 'runai-backend', 'gpu-operator', 'network-operator', 'prometheus'}
+                
+                if namespace in skip_namespaces:
+                    # Skip individual workloads, we'll only show the main Helm release
+                    continue
+                
+                # For user workload namespaces or standalone apps, add them
+                images = workload_data.get('images', [])
+                image_versions = [extract_version_from_image(img) for img in images]
+                
+                key = f"{namespace}/{name}"
+                consolidated[key] = {
+                    'namespace': namespace,
+                    'name': name,
+                    'source': 'Kubernetes',
+                    'image_versions': ', '.join(image_versions) if image_versions else 'N/A',
+                    'is_helm': False
+                }
+        
+        return consolidated
+    
+    pre_apps = consolidate_apps(pre_data)
+    post_apps = consolidate_apps(post_data)
+    all_apps = set(pre_apps.keys()) | set(post_apps.keys())
+    
+    with open(output_file, 'w') as f:
+        f.write("# Upgrade Summary (Simplified)\n\n")
+        f.write("This summary consolidates components for easy copy-paste to emails.\n\n")
+        f.write(f"**Pre-upgrade:** {pre_data.get('timestamp', 'N/A')}\n\n")
+        f.write(f"**Post-upgrade:** {post_data.get('timestamp', 'N/A')}\n\n")
+        
+        # Kubernetes Components
+        f.write("## Kubernetes Components\n\n")
+        f.write("| Component | Pre-Upgrade | Post-Upgrade | Status |\n")
+        f.write("|-----------|-------------|--------------|--------|\n")
+        
+        pre_k8s = pre_data['k8s_versions']
+        post_k8s = post_data['k8s_versions']
+        pre_etcd = pre_data['etcd_version']
+        post_etcd = post_data['etcd_version']
+        
+        # etcd
+        if pre_etcd != post_etcd:
+            f.write(f"| etcd | {pre_etcd} | {post_etcd} | ✅ Upgraded |\n")
+        else:
+            f.write(f"| etcd | {pre_etcd} | {post_etcd} | No change |\n")
+        
+        # Other K8s components
+        all_components = set(pre_k8s.keys()) | set(post_k8s.keys())
+        for component in sorted(all_components):
+            pre_ver = pre_k8s.get(component, 'N/A')
+            post_ver = post_k8s.get(component, 'N/A')
+            
+            if pre_ver == 'N/A' and post_ver != 'N/A':
+                status = "🆕 Added"
+            elif pre_ver != 'N/A' and post_ver == 'N/A':
+                status = "❌ Removed"
+            elif pre_ver != post_ver:
+                status = "✅ Upgraded"
+            else:
+                status = "No change"
+            
+            f.write(f"| {component} | {pre_ver} | {post_ver} | {status} |\n")
+        
+        f.write("\n")
+        
+        # Applications (consolidated)
+        f.write("## Applications\n\n")
+        f.write("| Namespace | Application | Pre-Upgrade | Post-Upgrade | Status |\n")
+        f.write("|-----------|-------------|-------------|--------------|--------|\n")
+        
+        # Count changes for summary
+        k8s_changed = 0
+        apps_upgraded = 0
+        apps_added = 0
+        apps_removed = 0
+        apps_unchanged = 0
+        
+        # K8s component changes
+        components_changed = sum(1 for c in all_components if pre_k8s.get(c) != post_k8s.get(c))
+        if pre_etcd != post_etcd:
+            components_changed += 1
+        k8s_changed = components_changed
+        
+        # Process apps
+        for app_key in sorted(all_apps):
+            pre_app = pre_apps.get(app_key)
+            post_app = post_apps.get(app_key)
+            
+            if pre_app and post_app:
+                namespace = pre_app['namespace']
+                name = pre_app['name']
+                
+                if pre_app.get('is_helm'):
+                    pre_ver = pre_app['chart_version']
+                    post_ver = post_app['chart_version']
+                    
+                    if pre_app['chart_version'] != post_app['chart_version']:
+                        status = "✅ Upgraded"
+                        apps_upgraded += 1
+                    else:
+                        status = "No change"
+                        apps_unchanged += 1
+                else:
+                    pre_ver = pre_app.get('image_versions', 'N/A')
+                    post_ver = post_app.get('image_versions', 'N/A')
+                    
+                    if pre_ver != post_ver:
+                        status = "✅ Upgraded"
+                        apps_upgraded += 1
+                    else:
+                        status = "No change"
+                        apps_unchanged += 1
+                
+                f.write(f"| {namespace} | {name} | {pre_ver} | {post_ver} | {status} |\n")
+            
+            elif pre_app and not post_app:
+                namespace = pre_app['namespace']
+                name = pre_app['name']
+                
+                if pre_app.get('is_helm'):
+                    pre_ver = pre_app['chart_version']
+                else:
+                    pre_ver = pre_app.get('image_versions', 'N/A')
+                
+                f.write(f"| {namespace} | {name} | {pre_ver} | - | ❌ Removed |\n")
+                apps_removed += 1
+            
+            elif not pre_app and post_app:
+                namespace = post_app['namespace']
+                name = post_app['name']
+                
+                if post_app.get('is_helm'):
+                    post_ver = post_app['chart_version']
+                else:
+                    post_ver = post_app.get('image_versions', 'N/A')
+                
+                f.write(f"| {namespace} | {name} | - | {post_ver} | 🆕 Added |\n")
+                apps_added += 1
+        
+        f.write("\n")
+        
+        # Summary
+        f.write("## Summary\n\n")
+        f.write(f"- **Kubernetes Components Changed:** {k8s_changed}\n")
+        f.write(f"- **Applications Upgraded:** {apps_upgraded}\n")
+        f.write(f"- **Applications Added:** {apps_added}\n")
+        f.write(f"- **Applications Removed:** {apps_removed}\n")
+        f.write(f"- **Applications Unchanged:** {apps_unchanged}\n")
+    
+    print(f"\nSimplified summary generated: {output_file}")
+
+
 def generate_diff_report(pre_data: Dict, post_data: Dict, output_file: str):
     """
     Generate a diff report comparing pre and post upgrade data.
@@ -744,6 +937,7 @@ def main():
     group.add_argument('--pre', action='store_true', help='Collect pre-upgrade snapshot')
     group.add_argument('--post', action='store_true', help='Collect post-upgrade snapshot')
     group.add_argument('--diff', action='store_true', help='Generate diff report comparing pre and post snapshots')
+    group.add_argument('--summary', action='store_true', help='Generate simplified summary (consolidates multi-component apps)')
     
     args = parser.parse_args()
     
@@ -799,6 +993,30 @@ def main():
         
         print("\nGenerating diff report...")
         generate_diff_report(pre_data, post_data, f"{logs_dir}/diff-overview.md")
+        
+        print("\n" + "=" * 50)
+        print("Done!")
+    
+    elif args.summary:
+        print("Kubernetes Overview Script - Summary Mode (Simplified)")
+        print("=" * 50)
+        
+        print("\nLoading pre-upgrade data...")
+        pre_data = load_data_from_file(f"{logs_dir}/pre-upgrade-overview.json")
+        
+        if not pre_data:
+            print("Error: Pre-upgrade data not found. Please run with --pre first.")
+            return 1
+        
+        print("Loading post-upgrade data...")
+        post_data = load_data_from_file(f"{logs_dir}/post-upgrade-overview.json")
+        
+        if not post_data:
+            print("Error: Post-upgrade data not found. Please run with --post first.")
+            return 1
+        
+        print("\nGenerating simplified summary...")
+        generate_simplified_summary(pre_data, post_data, f"{logs_dir}/summary-overview.md")
         
         print("\n" + "=" * 50)
         print("Done!")

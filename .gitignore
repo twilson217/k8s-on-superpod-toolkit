@@ -1,6 +1,21 @@
 # Logs directory - contains environment snapshots and discovery outputs
 .logs/
 
+# Local documentation that should not be synced
+.nosync/
+
+# Credentials and environment files
+*.env
+runai.env
+.env
+.env.*
+
+# Configuration files with environment-specific settings
+configs/
+
+# Cursor chat exports
+cursorchats/
+
 # Python
 __pycache__/
 *.py[cod]
